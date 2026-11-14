@@ -39,14 +39,32 @@ jobs:
             exit 1
           fi
 
-      - name: Restore debug keystore for signing
+      - name: Restore or provision debug keystore for signing
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+          if [ -f debug.keystore ]; then
+            echo "Using existing debug.keystore."
+          elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Restoring debug.keystore from DEBUG_KEYSTORE_BASE64 secret."
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+          elif [ -f debug.keystore.base64 ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64."
             base64 -d debug.keystore.base64 > debug.keystore
-          fi
-          if [ ! -f debug.keystore ]; then
-            echo "::error::Missing debug.keystore and debug.keystore.base64."
-            exit 1
+          elif [ -f "$HOME/.android/debug.keystore" ]; then
+            echo "::notice::Using runner's standard Android debug keystore (~/.android/debug.keystore)."
+            cp "$HOME/.android/debug.keystore" debug.keystore
+          else
+            echo "::notice::debug.keystore and debug.keystore.base64 not found; generating standard Android debug keystore for CI signing."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
       - name: Accept Android SDK licenses
