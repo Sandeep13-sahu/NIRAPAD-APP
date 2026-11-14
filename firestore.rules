@@ -1,0 +1,401 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidLat(lat) {
+      return lat is number && lat >= -90 && lat <= 90;
+    }
+
+    function isValidLon(lon) {
+      return lon is number && lon >= -180 && lon <= 180;
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 160)) &&
+             data.language is string && data.language in ['en', 'hi'] &&
+             data.deviationThresholdMeters is int && data.deviationThresholdMeters >= 100 && data.deviationThresholdMeters <= 2000 &&
+             data.retentionDays is int && data.retentionDays >= 1 && data.retentionDays <= 90 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidContact(data, ownerUid) {
+      return data.ownerUserId is string && data.ownerUserId == ownerUid &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+             (!('phoneNumber' in data) || data.phoneNumber == null || (data.phoneNumber is string && data.phoneNumber.size() <= 32)) &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 160)) &&
+             data.contactChannel is string && data.contactChannel.size() >= 3 && data.contactChannel.size() <= 160 &&
+             data.channelType is string && data.channelType in ['PHONE', 'EMAIL', 'SMS'] &&
+             (!('relationship' in data) || data.relationship == null || (data.relationship is string && data.relationship.size() <= 50)) &&
+             data.verified is bool &&
+             data.notifyOnStart is bool &&
+             data.notifyOnSos is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidJourney(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.ownerDisplayName is string && data.ownerDisplayName.size() >= 1 && data.ownerDisplayName.size() <= 100 &&
+             data.originLabel is string && data.originLabel.size() >= 1 && data.originLabel.size() <= 160 &&
+             isValidLat(data.originLat) && isValidLon(data.originLon) &&
+             data.destinationLabel is string && data.destinationLabel.size() >= 1 && data.destinationLabel.size() <= 160 &&
+             isValidLat(data.destinationLat) && isValidLon(data.destinationLon) &&
+             data.selectedRouteId is string && data.selectedRouteId.size() >= 1 && data.selectedRouteId.size() <= 64 &&
+             data.selectedRouteLabel is string && data.selectedRouteLabel.size() >= 1 && data.selectedRouteLabel.size() <= 120 &&
+             data.providerName is string && data.providerName.size() >= 1 && data.providerName.size() <= 64 &&
+             data.state is string && data.state in ['PLANNED', 'ACTIVE', 'DEVIATION_DETECTED', 'SOS_TRIGGERED', 'COMPLETED', 'CANCELLED'] &&
+             data.deviationThresholdMeters is int && data.deviationThresholdMeters >= 100 && data.deviationThresholdMeters <= 2000 &&
+             data.sharingEnabled is bool &&
+             data.sharedContactCount is int && data.sharedContactCount >= 0 && data.sharedContactCount <= 20 &&
+             data.shareTokenId is string && data.shareTokenId.size() <= 128 &&
+             isValidLat(data.lastLat) && isValidLon(data.lastLon) &&
+             data.lastAccuracyMeters is number && data.lastAccuracyMeters >= 0 && data.lastAccuracyMeters <= 5000 &&
+             (!('lastLocationAt' in data) || data.lastLocationAt == null || (data.lastLocationAt is timestamp && data.lastLocationAt <= request.time)) &&
+             (!('startedAt' in data) || data.startedAt == null || (data.startedAt is timestamp && data.startedAt <= request.time)) &&
+             (!('endedAt' in data) || data.endedAt == null || (data.endedAt is timestamp && data.endedAt <= request.time)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLocationPoint(data, journeyId) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.journeyId is string && data.journeyId == journeyId &&
+             isValidLat(data.lat) && isValidLon(data.lon) &&
+             data.accuracyMeters is number && data.accuracyMeters >= 0 && data.accuracyMeters <= 5000 &&
+             data.sequence is int && data.sequence >= 0 &&
+             data.recordedAt is timestamp && data.recordedAt <= request.time;
+    }
+
+    function isValidShareToken(data) {
+      return data.tokenHash is string && data.tokenHash.size() >= 32 && data.tokenHash.size() <= 128 &&
+             data.journeyId is string && data.journeyId.size() >= 1 && data.journeyId.size() <= 128 &&
+             data.ownerUserId is string && data.ownerUserId.size() >= 1 && data.ownerUserId.size() <= 128 &&
+             data.ownerDisplayName is string && data.ownerDisplayName.size() >= 1 && data.ownerDisplayName.size() <= 100 &&
+             data.destinationLabel is string && data.destinationLabel.size() >= 1 && data.destinationLabel.size() <= 160 &&
+             data.journeyState is string && data.journeyState.size() >= 1 && data.journeyState.size() <= 32 &&
+             isValidLat(data.lastLat) && isValidLon(data.lastLon) &&
+             data.lastLocationText is string && data.lastLocationText.size() <= 160 &&
+             data.revoked is bool &&
+             data.expiresAtMillis is int && data.expiresAtMillis > 0 &&
+             data.lastUpdatedAt is timestamp && data.lastUpdatedAt <= request.time &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSosSession(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.journeyId is string && data.journeyId.size() <= 128 &&
+             (!('shareTokenId' in data) || data.shareTokenId == null || (data.shareTokenId is string && data.shareTokenId.size() <= 128)) &&
+             data.dedupeKey is string && data.dedupeKey.size() >= 1 && data.dedupeKey.size() <= 128 &&
+             data.status is string && data.status in ['ACTIVE', 'CANCELLED', 'RESOLVED'] &&
+             isValidLat(data.lat) && isValidLon(data.lon) &&
+             data.locationLabel is string && data.locationLabel.size() >= 1 && data.locationLabel.size() <= 160 &&
+             data.deliverySummary is string && data.deliverySummary.size() >= 1 && data.deliverySummary.size() <= 400 &&
+             data.recipientCount is int && data.recipientCount >= 0 && data.recipientCount <= 20 &&
+             data.acknowledgedCount is int && data.acknowledgedCount >= 0 && data.acknowledgedCount <= 20 &&
+             (!('lastLocationAt' in data) || data.lastLocationAt == null || (data.lastLocationAt is timestamp && data.lastLocationAt <= request.time)) &&
+             data.activatedAt is timestamp && data.activatedAt <= request.time &&
+             (!('resolvedAt' in data) || data.resolvedAt == null || (data.resolvedAt is timestamp && data.resolvedAt <= request.time)) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSafetyReport(data) {
+      return data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.category is string && data.category in ['POOR_LIGHTING', 'HARASSMENT', 'ISOLATED_STRETCH', 'HAZARD', 'OTHER'] &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 100 &&
+             data.description is string && data.description.size() >= 5 && data.description.size() <= 500 &&
+             data.locationLabel is string && data.locationLabel.size() >= 1 && data.locationLabel.size() <= 160 &&
+             isValidLat(data.lat) && isValidLon(data.lon) &&
+             data.status is string && data.status in ['PENDING_REVIEW', 'FLAGGED', 'VERIFIED', 'RESOLVED', 'DISMISSED'] &&
+             (!('moderationNote' in data) || data.moderationNote == null || (data.moderationNote is string && data.moderationNote.size() <= 300)) &&
+             (!('moderatedBy' in data) || data.moderatedBy == null || (data.moderatedBy is string && data.moderatedBy.size() <= 128)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidEmergencyFacility(data) {
+      return data.type is string && data.type in ['POLICE', 'AMBULANCE', 'WOMENS_SUPPORT', 'HOSPITAL', 'HELPLINE', 'SAFE_HUB'] &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+             data.phone is string && data.phone.size() >= 3 && data.phone.size() <= 32 &&
+             data.address is string && data.address.size() >= 3 && data.address.size() <= 200 &&
+             isValidLat(data.lat) && isValidLon(data.lon) &&
+             data.verifiedSource is string && data.verifiedSource.size() >= 2 && data.verifiedSource.size() <= 120 &&
+             data.verifiedAtLabel is string && data.verifiedAtLabel.size() >= 4 && data.verifiedAtLabel.size() <= 40 &&
+             data.activeStatus is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAuditLog(data) {
+      return data.actorId is string && data.actorId == request.auth.uid &&
+             data.action is string && data.action.size() >= 2 && data.action.size() <= 80 &&
+             data.resourceType is string && data.resourceType.size() >= 2 && data.resourceType.size() <= 64 &&
+             data.resourceId is string && data.resourceId.size() >= 1 && data.resourceId.size() <= 128 &&
+             data.outcome is string && data.outcome.size() >= 2 && data.outcome.size() <= 40 &&
+             data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 300 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // 1. User profiles
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'language', 'deviationThresholdMeters', 'retentionDays', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'language', 'deviationThresholdMeters', 'retentionDays', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidUserProfile(incoming()) &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'language', 'deviationThresholdMeters', 'retentionDays', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      // 2. Trusted Emergency Contacts subcollection
+      match /contacts/{contactId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(contactId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(contactId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll(['ownerUserId', 'name', 'contactChannel', 'channelType', 'verified', 'notifyOnStart', 'notifyOnSos', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['ownerUserId', 'name', 'phoneNumber', 'email', 'contactChannel', 'channelType', 'relationship', 'verified', 'notifyOnStart', 'notifyOnSos', 'createdAt', 'updatedAt']) &&
+                         isValidContact(incoming(), userId);
+
+        allow update: if isSignedIn() &&
+                         isValidContact(incoming(), userId) &&
+                         isValidId(userId) &&
+                         isValidId(contactId) &&
+                         request.auth.uid == userId &&
+                         incoming().ownerUserId == existing().ownerUserId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phoneNumber', 'email', 'contactChannel', 'channelType', 'relationship', 'verified', 'notifyOnStart', 'notifyOnSos', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(contactId) && request.auth.uid == userId;
+      }
+    }
+
+    // 3. Journeys
+    match /journeys/{journeyId} {
+      allow get: if isSignedIn() && isValidId(journeyId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(journeyId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().state in ['PLANNED', 'ACTIVE'] &&
+                       incoming().keys().hasAll(['userId', 'ownerDisplayName', 'originLabel', 'originLat', 'originLon', 'destinationLabel', 'destinationLat', 'destinationLon', 'selectedRouteId', 'selectedRouteLabel', 'providerName', 'state', 'deviationThresholdMeters', 'sharingEnabled', 'sharedContactCount', 'shareTokenId', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'ownerDisplayName', 'originLabel', 'originLat', 'originLon', 'destinationLabel', 'destinationLat', 'destinationLon', 'selectedRouteId', 'selectedRouteLabel', 'providerName', 'state', 'deviationThresholdMeters', 'sharingEnabled', 'sharedContactCount', 'shareTokenId', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'lastLocationAt', 'startedAt', 'endedAt', 'createdAt', 'updatedAt']) &&
+                       isValidJourney(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidJourney(incoming()) &&
+                       isValidId(journeyId) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       !(existing().state in ['COMPLETED', 'CANCELLED']) &&
+                       (
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['state', 'startedAt', 'endedAt', 'updatedAt'])) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['state', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'lastLocationAt', 'updatedAt'])) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['sharingEnabled', 'sharedContactCount', 'shareTokenId', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(journeyId) && existing().userId == request.auth.uid;
+
+      // 4. Location Breadcrumbs subcollection
+      match /locations/{pointId} {
+        allow get: if isSignedIn() && isValidId(journeyId) && isValidId(pointId) && existing().userId == request.auth.uid;
+        allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+        allow create: if isSignedIn() &&
+                         isValidId(journeyId) &&
+                         isValidId(pointId) &&
+                         incoming().keys().hasAll(['userId', 'journeyId', 'lat', 'lon', 'accuracyMeters', 'sequence', 'recordedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'journeyId', 'lat', 'lon', 'accuracyMeters', 'sequence', 'recordedAt']) &&
+                         isValidLocationPoint(incoming(), journeyId) &&
+                         exists(/databases/$(database)/documents/journeys/$(journeyId)) &&
+                         get(/databases/$(database)/documents/journeys/$(journeyId)).data.userId == request.auth.uid;
+
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(journeyId) && isValidId(pointId) && existing().userId == request.auth.uid;
+      }
+    }
+
+    // 5. Scoped Share Tokens (read-only by exact high-entropy token ID; listing restricted to owner)
+    match /share_tokens/{tokenId} {
+      allow get: if isSignedIn() &&
+                    isValidId(tokenId) &&
+                    (existing().ownerUserId == request.auth.uid || (tokenId.size() >= 16 && existing().revoked == false));
+      allow list: if isSignedIn() && resource.data.ownerUserId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(tokenId) &&
+                       tokenId.size() >= 16 &&
+                       incoming().ownerUserId == request.auth.uid &&
+                       incoming().keys().hasAll(['tokenHash', 'journeyId', 'ownerUserId', 'ownerDisplayName', 'destinationLabel', 'journeyState', 'lastLat', 'lastLon', 'lastLocationText', 'revoked', 'expiresAtMillis', 'lastUpdatedAt', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['tokenHash', 'journeyId', 'ownerUserId', 'ownerDisplayName', 'destinationLabel', 'journeyState', 'lastLat', 'lastLon', 'lastLocationText', 'revoked', 'expiresAtMillis', 'lastUpdatedAt', 'createdAt', 'updatedAt']) &&
+                       isValidShareToken(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidShareToken(incoming()) &&
+                       isValidId(tokenId) &&
+                       existing().ownerUserId == request.auth.uid &&
+                       incoming().ownerUserId == existing().ownerUserId &&
+                       incoming().journeyId == existing().journeyId &&
+                       incoming().tokenHash == existing().tokenHash &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['journeyState', 'lastLat', 'lastLon', 'lastLocationText', 'revoked', 'expiresAtMillis', 'lastUpdatedAt', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(tokenId) && existing().ownerUserId == request.auth.uid;
+    }
+
+    // 6. SOS Sessions
+    match /sos_sessions/{sosId} {
+      allow get: if isSignedIn() && isValidId(sosId) && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(sosId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'ACTIVE' &&
+                       incoming().keys().hasAll(['userId', 'journeyId', 'dedupeKey', 'status', 'lat', 'lon', 'locationLabel', 'deliverySummary', 'recipientCount', 'acknowledgedCount', 'activatedAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'journeyId', 'shareTokenId', 'dedupeKey', 'status', 'lat', 'lon', 'locationLabel', 'deliverySummary', 'recipientCount', 'acknowledgedCount', 'lastLocationAt', 'activatedAt', 'resolvedAt', 'updatedAt']) &&
+                       isValidSosSession(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidSosSession(incoming()) &&
+                       isValidId(sosId) &&
+                       (existing().userId == request.auth.uid || isAdmin()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().dedupeKey == existing().dedupeKey &&
+                       incoming().activatedAt == existing().activatedAt &&
+                       !(existing().status in ['CANCELLED', 'RESOLVED']) &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'deliverySummary', 'acknowledgedCount', 'resolvedAt', 'updatedAt']) ||
+                         (
+                           existing().userId == request.auth.uid &&
+                           incoming().status == 'ACTIVE' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['lat', 'lon', 'locationLabel', 'lastLocationAt', 'shareTokenId', 'deliverySummary', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if false;
+    }
+
+    // 7. Safety Reports
+    match /safety_reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (existing().reporterId == request.auth.uid || existing().status == 'VERIFIED' || isAdmin());
+      allow list: if isSignedIn() && (resource.data.reporterId == request.auth.uid || resource.data.status == 'VERIFIED' || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(reportId) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'PENDING_REVIEW' &&
+                       incoming().keys().hasAll(['reporterId', 'category', 'title', 'description', 'locationLabel', 'lat', 'lon', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['reporterId', 'category', 'title', 'description', 'locationLabel', 'lat', 'lon', 'status', 'moderationNote', 'moderatedBy', 'createdAt', 'updatedAt']) &&
+                       isValidSafetyReport(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidSafetyReport(incoming()) &&
+                       isValidId(reportId) &&
+                       isAdmin() &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'moderationNote', 'moderatedBy', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(reportId) && existing().reporterId == request.auth.uid;
+    }
+
+    // 8. Emergency Directory (Verified facilities)
+    match /emergency_facilities/{facilityId} {
+      allow get: if isSignedIn() && isValidId(facilityId) && (existing().activeStatus == true || isAdmin());
+      allow list: if isSignedIn() && (resource.data.activeStatus == true || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(facilityId) &&
+                       isAdmin() &&
+                       incoming().keys().hasAll(['type', 'name', 'phone', 'address', 'lat', 'lon', 'verifiedSource', 'verifiedAtLabel', 'activeStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['type', 'name', 'phone', 'address', 'lat', 'lon', 'verifiedSource', 'verifiedAtLabel', 'activeStatus', 'createdAt', 'updatedAt']) &&
+                       isValidEmergencyFacility(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidEmergencyFacility(incoming()) &&
+                       isValidId(facilityId) &&
+                       isAdmin() &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'phone', 'address', 'lat', 'lon', 'verifiedSource', 'verifiedAtLabel', 'activeStatus', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(facilityId) && isAdmin();
+    }
+
+    // 9. Operations Admin Records (bootstrapped verified owner email only)
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list, update, delete: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(adminId) &&
+                       request.auth.uid == adminId &&
+                       request.auth.token.email_verified == true &&
+                       request.auth.token.email == 'sandeepsahukumar54321@gmail.com' &&
+                       incoming().keys().hasAll(['email', 'role', 'grantedAt']) &&
+                       incoming().keys().hasOnly(['email', 'role', 'grantedAt']) &&
+                       incoming().email == request.auth.token.email &&
+                       incoming().role == 'OPS_ADMIN' &&
+                       incoming().grantedAt is timestamp &&
+                       incoming().grantedAt <= request.time;
+    }
+
+    // 10. Audit Logs (append-only)
+    match /audit_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (existing().actorId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.actorId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(logId) &&
+                       incoming().keys().hasAll(['actorId', 'action', 'resourceType', 'resourceId', 'outcome', 'summary', 'createdAt']) &&
+                       incoming().keys().hasOnly(['actorId', 'action', 'resourceType', 'resourceId', 'outcome', 'summary', 'createdAt']) &&
+                       isValidAuditLog(incoming());
+
+      allow update, delete: if false;
+    }
+  }
+}

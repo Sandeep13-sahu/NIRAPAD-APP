@@ -1,0 +1,6 @@
+{
+  "name": "NIRAPAD",
+  "description": "Women Safety Navigation & Intelligent Route Assistance Platform featuring explainable route comparison, protected journeys, live trusted-contact sharing, deviation detection, deliberate SOS workflow, verified emergency directory, safety reports, admin moderation/audit workspace, and advisory AI navigation help.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

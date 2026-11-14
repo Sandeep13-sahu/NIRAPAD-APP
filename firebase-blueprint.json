@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Traveller profile, language preference, deviation threshold, and privacy retention settings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the user." },
+        "displayName": { "type": "string", "description": "User display name." },
+        "email": { "type": "string", "description": "User email address." },
+        "language": { "type": "string", "enum": ["en", "hi"], "description": "Preferred app language." },
+        "deviationThresholdMeters": { "type": "integer", "description": "Configured route deviation threshold in meters." },
+        "retentionDays": { "type": "integer", "description": "Location history retention period in days." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation server timestamp." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp." }
+      },
+      "required": ["userId", "displayName", "language", "deviationThresholdMeters", "retentionDays", "createdAt", "updatedAt"]
+    },
+    "EmergencyContact": {
+      "title": "EmergencyContact",
+      "description": "Trusted contact owned by a traveller for live journey sharing and SOS notifications.",
+      "type": "object",
+      "properties": {
+        "ownerUserId": { "type": "string" },
+        "name": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "contactChannel": { "type": "string" },
+        "channelType": { "type": "string", "enum": ["PHONE", "EMAIL", "SMS"] },
+        "relationship": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "notifyOnStart": { "type": "boolean" },
+        "notifyOnSos": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUserId", "name", "contactChannel", "channelType", "verified", "notifyOnStart", "notifyOnSos", "createdAt", "updatedAt"]
+    },
+    "Journey": {
+      "title": "Journey",
+      "description": "Protected journey lifecycle state, selected route, sharing configuration, and latest validated position.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "ownerDisplayName": { "type": "string" },
+        "originLabel": { "type": "string" },
+        "originLat": { "type": "number" },
+        "originLon": { "type": "number" },
+        "destinationLabel": { "type": "string" },
+        "destinationLat": { "type": "number" },
+        "destinationLon": { "type": "number" },
+        "selectedRouteId": { "type": "string" },
+        "selectedRouteLabel": { "type": "string" },
+        "providerName": { "type": "string" },
+        "state": { "type": "string", "enum": ["PLANNED", "ACTIVE", "DEVIATION_DETECTED", "SOS_TRIGGERED", "COMPLETED", "CANCELLED"] },
+        "deviationThresholdMeters": { "type": "integer" },
+        "sharingEnabled": { "type": "boolean" },
+        "sharedContactCount": { "type": "integer" },
+        "shareTokenId": { "type": "string" },
+        "lastLat": { "type": "number" },
+        "lastLon": { "type": "number" },
+        "lastAccuracyMeters": { "type": "number" },
+        "lastLocationAt": { "type": "string", "format": "date-time" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "ownerDisplayName", "originLabel", "originLat", "originLon", "destinationLabel", "destinationLat", "destinationLon", "selectedRouteId", "selectedRouteLabel", "providerName", "state", "deviationThresholdMeters", "sharingEnabled", "sharedContactCount", "shareTokenId", "lastLat", "lastLon", "lastAccuracyMeters", "createdAt", "updatedAt"]
+    },
+    "LocationPoint": {
+      "title": "LocationPoint",
+      "description": "Validated GPS breadcrumb point recorded during an active journey.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "journeyId": { "type": "string" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "accuracyMeters": { "type": "number" },
+        "sequence": { "type": "integer" },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "journeyId", "lat", "lon", "accuracyMeters", "sequence", "recordedAt"]
+    },
+    "ShareToken": {
+      "title": "ShareToken",
+      "description": "High-entropy, time-limited, revocable read-only share view for trusted contacts.",
+      "type": "object",
+      "properties": {
+        "tokenHash": { "type": "string" },
+        "journeyId": { "type": "string" },
+        "ownerUserId": { "type": "string" },
+        "ownerDisplayName": { "type": "string" },
+        "destinationLabel": { "type": "string" },
+        "journeyState": { "type": "string" },
+        "lastLat": { "type": "number" },
+        "lastLon": { "type": "number" },
+        "lastLocationText": { "type": "string" },
+        "revoked": { "type": "boolean" },
+        "expiresAtMillis": { "type": "integer" },
+        "lastUpdatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tokenHash", "journeyId", "ownerUserId", "ownerDisplayName", "destinationLabel", "journeyState", "lastLat", "lastLon", "lastLocationText", "revoked", "expiresAtMillis", "lastUpdatedAt", "createdAt", "updatedAt"]
+    },
+    "SosSession": {
+      "title": "SosSession",
+      "description": "Deduplicated emergency SOS session and recipient delivery status.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "journeyId": { "type": "string" },
+        "shareTokenId": { "type": "string" },
+        "dedupeKey": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "CANCELLED", "RESOLVED"] },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "locationLabel": { "type": "string" },
+        "deliverySummary": { "type": "string" },
+        "recipientCount": { "type": "integer" },
+        "acknowledgedCount": { "type": "integer" },
+        "lastLocationAt": { "type": "string", "format": "date-time" },
+        "activatedAt": { "type": "string", "format": "date-time" },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "journeyId", "dedupeKey", "status", "lat", "lon", "locationLabel", "deliverySummary", "recipientCount", "acknowledgedCount", "activatedAt", "updatedAt"]
+    },
+    "SafetyReport": {
+      "title": "SafetyReport",
+      "description": "User-submitted safety observation requiring admin moderation before verification.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "category": { "type": "string", "enum": ["POOR_LIGHTING", "HARASSMENT", "ISOLATED_STRETCH", "HAZARD", "OTHER"] },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "locationLabel": { "type": "string" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "status": { "type": "string", "enum": ["PENDING_REVIEW", "FLAGGED", "VERIFIED", "RESOLVED", "DISMISSED"] },
+        "moderationNote": { "type": "string" },
+        "moderatedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "category", "title", "description", "locationLabel", "lat", "lon", "status", "createdAt", "updatedAt"]
+    },
+    "EmergencyFacility": {
+      "title": "EmergencyFacility",
+      "description": "Verified police station, hospital, or safe hub maintained by operations admins.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["POLICE", "AMBULANCE", "WOMENS_SUPPORT", "HOSPITAL", "HELPLINE", "SAFE_HUB"] },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "verifiedSource": { "type": "string" },
+        "verifiedAtLabel": { "type": "string" },
+        "activeStatus": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "name", "phone", "address", "lat", "lon", "verifiedSource", "verifiedAtLabel", "activeStatus", "createdAt", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Authorized operations administrator role record.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "grantedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "grantedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only audit trail for SOS lifecycle, share revocation, and admin actions.",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "action": { "type": "string" },
+        "resourceType": { "type": "string" },
+        "resourceId": { "type": "string" },
+        "outcome": { "type": "string" },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorId", "action", "resourceType", "resourceId", "outcome", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-isolated traveller profile and privacy preferences."
+    },
+    "/users/{userId}/contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/EmergencyContact" },
+      "description": "Owner-isolated trusted emergency contacts."
+    },
+    "/journeys/{journeyId}": {
+      "schema": { "$ref": "#/entities/Journey" },
+      "description": "User-owned protected journey records."
+    },
+    "/journeys/{journeyId}/locations/{pointId}": {
+      "schema": { "$ref": "#/entities/LocationPoint" },
+      "description": "Retention-limited GPS location breadcrumbs for a journey."
+    },
+    "/share_tokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/ShareToken" },
+      "description": "High-entropy scoped read-only live share tokens."
+    },
+    "/sos_sessions/{sosId}": {
+      "schema": { "$ref": "#/entities/SosSession" },
+      "description": "Deduplicated SOS trigger and delivery audit records."
+    },
+    "/safety_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/SafetyReport" },
+      "description": "Moderated community safety reports."
+    },
+    "/emergency_facilities/{facilityId}": {
+      "schema": { "$ref": "#/entities/EmergencyFacility" },
+      "description": "Verified police, hospital, helpline, and safe hub directory."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Operations admin authorization records."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Append-only security and operations audit logs."
+    }
+  }
+}

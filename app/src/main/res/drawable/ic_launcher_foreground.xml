@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer protective shield silhouette within 66dp safe zone (center 54,54) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,23 L78,33 L78,53 C78,68.5 67.6,81.4 54,85 C40.4,81.4 30,68.5 30,53 L30,33 Z" />
+    <!-- Inner teal-navy navigation compass pin cutout -->
+    <path
+        android:fillColor="#087E8B"
+        android:pathData="M54,35 C46.8,35 41,40.8 41,48 C41,57.5 54,71 54,71 C54,71 67,57.5 67,48 C67,40.8 61.2,35 54,35 Z" />
+    <!-- Central safety beacon dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,43 A5,5 0 1,1 53.99,43 Z" />
+</vector>
