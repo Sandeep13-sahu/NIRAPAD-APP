@@ -20,15 +20,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.LocalPolice
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Report
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -50,8 +53,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.DataProvenance
 import com.example.data.model.EmergencyFacility
+import com.example.data.model.NearbyPoliceStation
 import com.example.data.model.SafetyReport
 import com.example.data.model.SosSession
+import com.example.data.service.GuardianShareHelper
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
@@ -88,7 +93,10 @@ fun EmergencyScreen(
     onOpenDirectory: () -> Unit,
     onUpdateSosStatus: (SosSession, String) -> Unit,
     onSubmitReport: (String, String, String, String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
+    isLoadingPoliceStations: Boolean = false,
+    onRefreshPoliceStations: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -231,18 +239,13 @@ fun EmergencyScreen(
                                         onClick = {
                                             val msg = String.format(
                                                 Locale.US,
-                                                "NIRAPAD SOS ALERT: Live location active. Token: %s | Coordinates: %.5f, %.5f | https://maps.google.com/?q=%.5f,%.5f",
+                                                "NIRAPAD SOS ALERT: Live location active. Token: %s | Coordinates: %.5f, %.5f | %s",
                                                 sos.shareTokenId,
                                                 liveLat,
                                                 liveLon,
-                                                liveLat,
-                                                liveLon
+                                                GuardianShareHelper.buildOpenStreetMapLink(liveLat, liveLon)
                                             )
-                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                                type = "text/plain"
-                                                putExtra(Intent.EXTRA_TEXT, msg)
-                                            }
-                                            context.startActivity(Intent.createChooser(sendIntent, "Share Live SOS Location"))
+                                            GuardianShareHelper.launchWhatsAppShare(context, msg)
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = NirapadPrimaryTeal,
@@ -277,6 +280,95 @@ fun EmergencyScreen(
                                     Text("I'm Safe (Resolve)", color = Color.White, fontWeight = FontWeight.SemiBold)
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Nearby Police Stations (OSM Overpass within 8 km)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.LocalPolice, contentDescription = null, tint = NirapadNavyDark)
+                Text("Nearby Police Stations (8 km)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
+            }
+            IconButton(
+                onClick = onRefreshPoliceStations,
+                modifier = Modifier.minimumInteractiveComponentSize().testTag("refresh_police_stations_button")
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh nearby police stations", tint = NirapadPrimaryTeal)
+            }
+        }
+        if (isLoadingPoliceStations && nearbyPoliceStations.isEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirapadPrimaryTeal)
+                Text("Scanning OpenStreetMap police stations within 8 km...", style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+            }
+        } else if (nearbyPoliceStations.isEmpty()) {
+            Surface(
+                color = NirapadSurface,
+                border = BorderStroke(1.dp, NirapadBorderSubtle),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Tap refresh to load OpenStreetMap police stations within 8 km, or dial 112 / 1091 directly below.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NirapadTextSecondary,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        } else {
+            nearbyPoliceStations.take(6).forEach { station ->
+                val dialNumber = station.phone?.takeIf { it.isNotBlank() } ?: "112"
+                val buttonLabel = if (!station.phone.isNullOrBlank()) "Call Station" else "Call 112"
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = NirapadSurface),
+                    border = BorderStroke(1.dp, NirapadBorderSubtle),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("police_station_card_${station.id}")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(station.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
+                            Text(
+                                text = String.format(Locale.US, "%.1f km away • %s", station.distanceMeters / 1000.0, station.locality),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NirapadTextSecondary
+                            )
+                            Text(
+                                text = if (!station.phone.isNullOrBlank()) "Phone: ${station.phone} • OpenStreetMap" else "OSM phone unlisted • Dials 112 ERSS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NirapadPrimaryTeal
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$dialNumber"))
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NirapadNavyDark,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.minimumInteractiveComponentSize().testTag("call_police_${station.id}")
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = "Call ${station.name}", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(buttonLabel, color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

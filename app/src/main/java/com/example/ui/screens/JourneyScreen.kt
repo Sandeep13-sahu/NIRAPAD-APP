@@ -17,9 +17,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Straight
+import androidx.compose.material.icons.filled.TurnLeft
+import androidx.compose.material.icons.filled.TurnRight
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -33,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,17 +49,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.firestore.UiState
 import com.example.data.model.EmergencyFacility
 import com.example.data.model.Journey
 import com.example.data.model.JourneyState
 import com.example.data.model.LatLon
+import com.example.data.model.NearbyPoliceStation
 import com.example.data.model.RouteOption
+import com.example.data.model.RouteProgress
 import com.example.data.model.ShareToken
+import com.example.data.model.WeatherContext
+import com.example.data.service.GuardianShareHelper
 import com.example.data.service.LocationReading
 import com.example.localization.NirapadCopy
 import com.example.ui.components.DeliberateSosButton
@@ -97,8 +110,15 @@ fun JourneyScreen(
     modifier: Modifier = Modifier,
     hasLiveGpsFix: Boolean = currentLocation.timestampMillis > 0L,
     locationPermissionGranted: Boolean = hasLiveGpsFix,
-    onRequestLocationPermission: () -> Unit = {}
+    onRequestLocationPermission: () -> Unit = {},
+    currentAddressLabel: String? = null,
+    weatherContext: WeatherContext? = null,
+    routeProgress: RouteProgress? = null,
+    arrivedJourneyId: String? = null,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
+    onDismissArrival: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var tokenInput by remember(activeJourney?.shareTokenId) {
         mutableStateOf(activeJourney?.shareTokenId.orEmpty())
@@ -148,6 +168,16 @@ fun JourneyScreen(
             } else {
                 LatLon(activeJourney.lastLat, activeJourney.lastLon)
             }
+
+            // Live Turn-by-Turn Navigation Instruction Card
+            TurnByTurnNavigationCard(
+                activeJourney = activeJourney,
+                selectedRoute = selectedRoute,
+                routeProgress = routeProgress,
+                currentAddressLabel = currentAddressLabel,
+                weatherContext = weatherContext
+            )
+
             NirapadMapCanvas(
                 currentLocation = liveLoc,
                 routes = listOfNotNull(selectedRoute),
@@ -161,8 +191,10 @@ fun JourneyScreen(
                 locationPermissionGranted = locationPermissionGranted,
                 autoFollowByDefault = true,
                 fullscreenTitle = "Protected Journey • ${activeJourney.destinationLabel}",
-                fullscreenSubtitle = "${activeJourney.state} • Corridor offset ${deviationDistanceM}m",
+                fullscreenSubtitle = currentAddressLabel ?: "${activeJourney.state} • Corridor offset ${deviationDistanceM}m",
                 onRequestLocationPermission = onRequestLocationPermission,
+                remainingPolyline = routeProgress?.remainingPolyline,
+                nearbyPoliceStations = nearbyPoliceStations,
                 modifier = Modifier.height(210.dp)
             )
 
@@ -228,6 +260,35 @@ fun JourneyScreen(
                         )
                     }
 
+                    // One-tap Share Live on WhatsApp (OSM clickable link + live locality + share token)
+                    Button(
+                        onClick = {
+                            val msg = GuardianShareHelper.buildLiveShareMessage(
+                                travellerName = activeJourney.ownerDisplayName,
+                                locationName = currentAddressLabel.orEmpty(),
+                                lat = liveLoc.lat,
+                                lon = liveLoc.lon,
+                                destinationLabel = activeJourney.destinationLabel,
+                                shareTokenId = activeJourney.shareTokenId,
+                                remainingMeters = routeProgress?.remainingDistanceMeters
+                            )
+                            GuardianShareHelper.launchWhatsAppShare(context, msg)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPositiveGreen,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .testTag("share_whatsapp_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Share Live on WhatsApp", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+
                     // Explicit sharing status & one-tap revoke
                     if (activeJourney.sharingEnabled && activeJourney.shareTokenId.isNotBlank()) {
                         Surface(
@@ -276,7 +337,7 @@ fun JourneyScreen(
                             }
                         }
                     } else {
-                        Text("Live sharing is OFF for this journey.", style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+                        Text("Live sharing token is OFF for this journey.", style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
                     }
 
                     // Deviation Prompt Card (calm, non-blaming)
@@ -460,6 +521,180 @@ fun JourneyScreen(
                         }
                         Text(j.state, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = NirapadPrimaryTeal)
                     }
+                }
+            }
+        }
+    }
+
+    // Destination Reached (<= 35m) Celebratory Completion Modal
+    if (activeJourney != null && (arrivedJourneyId == activeJourney.id || routeProgress?.hasArrived == true)) {
+        if (arrivedJourneyId == activeJourney.id) {
+            DestinationReachedModal(
+                destinationLabel = activeJourney.destinationLabel,
+                onCompleteAndClose = { onEndJourney(activeJourney) },
+                onDismiss = { onDismissArrival(activeJourney.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun TurnByTurnNavigationCard(
+    activeJourney: Journey,
+    selectedRoute: RouteOption?,
+    routeProgress: RouteProgress?,
+    currentAddressLabel: String?,
+    weatherContext: WeatherContext?
+) {
+    val activeStep = routeProgress?.activeStep ?: selectedRoute?.steps?.firstOrNull()
+    val remMeters = routeProgress?.remainingDistanceMeters ?: selectedRoute?.distanceMeters ?: 0
+    val remMins = ((routeProgress?.remainingDurationSeconds ?: selectedRoute?.durationSeconds ?: 0) / 60).coerceAtLeast(1)
+    val stepDistMeters = routeProgress?.distanceToNextStepMeters ?: activeStep?.distanceMeters ?: 0
+
+    val maneuverIcon = when {
+        routeProgress?.hasArrived == true || activeStep?.maneuverType == "arrive" -> Icons.Default.Flag
+        activeStep?.maneuverModifier?.contains("left", ignoreCase = true) == true -> Icons.Default.TurnLeft
+        activeStep?.maneuverModifier?.contains("right", ignoreCase = true) == true -> Icons.Default.TurnRight
+        activeStep != null -> Icons.Default.Straight
+        else -> Icons.Default.Navigation
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = NirapadNavyDark),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().testTag("turn_by_turn_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = NirapadPrimaryTeal,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = maneuverIcon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(10.dp).size(26.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    val primaryInstruction = when {
+                        routeProgress?.hasArrived == true -> "Arriving at ${activeJourney.destinationLabel}"
+                        activeStep != null && stepDistMeters > 0 -> "${activeStep.instruction} in $stepDistMeters m"
+                        activeStep != null -> activeStep.instruction
+                        else -> "Follow safe corridor toward ${activeJourney.destinationLabel}"
+                    }
+                    Text(
+                        text = primaryInstruction,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    val remDistText = if (remMeters >= 1000) {
+                        String.format(Locale.US, "%.1f km remaining", remMeters / 1000.0)
+                    } else if (remMeters > 0) {
+                        "$remMeters m remaining"
+                    } else {
+                        "Tracking route progress"
+                    }
+                    Text(
+                        text = "$remDistText • ETA $remMins min",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFBAE6FD)
+                    )
+                }
+            }
+            if (!currentAddressLabel.isNullOrBlank() || (weatherContext != null && !weatherContext.isDay)) {
+                HorizontalDivider(color = Color.White.copy(alpha = 0.16f))
+                Text(
+                    text = buildString {
+                        if (!currentAddressLabel.isNullOrBlank()) {
+                            append("Near $currentAddressLabel")
+                        }
+                        if (weatherContext != null && !weatherContext.isDay) {
+                            if (isNotEmpty()) append(" • ")
+                            append("After-dark safety priority ON")
+                        }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFE2E8F0)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DestinationReachedModal(
+    destinationLabel: String,
+    onCompleteAndClose: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = NirapadSurface,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.5.dp, NirapadPositiveGreen),
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .fillMaxWidth()
+                .testTag("destination_reached_modal")
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = NirapadPositiveContainer,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = NirapadPositiveGreen,
+                        modifier = Modifier.padding(12.dp).size(36.dp)
+                    )
+                }
+                Text(
+                    text = "Destination Reached — Journey Succeeded!",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = NirapadNavyDark
+                )
+                Text(
+                    text = "You have arrived safely within 35 meters of $destinationLabel. Complete the journey to stop GPS tracking and close live guardian sharing.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NirapadTextSecondary
+                )
+                Button(
+                    onClick = onCompleteAndClose,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPositiveGreen,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("complete_close_journey_button")
+                ) {
+                    Text("Complete & Close Journey", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.minimumInteractiveComponentSize().testTag("dismiss_arrival_button")
+                ) {
+                    Text("Keep Map Open", color = NirapadNavyDark)
                 }
             }
         }

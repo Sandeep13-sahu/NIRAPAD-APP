@@ -15,21 +15,27 @@ import com.example.data.model.Journey
 import com.example.data.model.JourneyState
 import com.example.data.model.JourneyStateMachine
 import com.example.data.model.LatLon
+import com.example.data.model.NearbyPoliceStation
+import com.example.data.model.PlaceSuggestion
 import com.example.data.model.RouteOption
+import com.example.data.model.RouteProgress
 import com.example.data.model.RouteSearchResult
 import com.example.data.model.SafetyReport
 import com.example.data.model.ShareToken
 import com.example.data.model.SosSession
 import com.example.data.model.UserProfile
+import com.example.data.model.WeatherContext
 import com.example.data.repository.AdvisoryAiClient
 import com.example.data.repository.AiAdvisorUiState
 import com.example.data.repository.NirapadRepository
+import com.example.data.service.FreeSafetyApisClient
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.AppLang
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,19 +43,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@OptIn(FlowPreview::class)
 class NirapadViewModel(
     private val repository: NirapadRepository,
     private val aiAdvisor: AdvisoryAiClient,
     val currentUserId: String,
     private val currentUserName: String,
     private val currentUserEmail: String,
-    private val mapTileCache: MapTileCache? = null
+    private val mapTileCache: MapTileCache? = null,
+    private val freeApisClient: FreeSafetyApisClient = RoutingAndSafetyEngine.defaultApiClient
 ) : ViewModel() {
 
     private val _isAdmin = MutableStateFlow(false)
@@ -83,11 +93,39 @@ class NirapadViewModel(
     private val _destinationQuery = MutableStateFlow("Hauz Khas Metro Gate 1")
     val destinationQuery: StateFlow<String> = _destinationQuery.asStateFlow()
 
+    private val _autocompleteInput = MutableStateFlow("")
+    private val _selectedPlaceSuggestion = MutableStateFlow<PlaceSuggestion?>(null)
+    val selectedPlaceSuggestion: StateFlow<PlaceSuggestion?> = _selectedPlaceSuggestion.asStateFlow()
+
+    private val _placeSuggestions = MutableStateFlow<List<PlaceSuggestion>>(emptyList())
+    val placeSuggestions: StateFlow<List<PlaceSuggestion>> = _placeSuggestions.asStateFlow()
+
+    private val _isSearchingPlaces = MutableStateFlow(false)
+    val isSearchingPlaces: StateFlow<Boolean> = _isSearchingPlaces.asStateFlow()
+
+    private val _currentAddressLabel = MutableStateFlow<String?>(null)
+    val currentAddressLabel: StateFlow<String?> = _currentAddressLabel.asStateFlow()
+
+    private val _weatherContext = MutableStateFlow<WeatherContext?>(null)
+    val weatherContext: StateFlow<WeatherContext?> = _weatherContext.asStateFlow()
+
+    private val _nearbyPoliceStations = MutableStateFlow<List<NearbyPoliceStation>>(emptyList())
+    val nearbyPoliceStations: StateFlow<List<NearbyPoliceStation>> = _nearbyPoliceStations.asStateFlow()
+
+    private val _isLoadingPoliceStations = MutableStateFlow(false)
+    val isLoadingPoliceStations: StateFlow<Boolean> = _isLoadingPoliceStations.asStateFlow()
+
     private val _routeSearchState = MutableStateFlow<UiState<RouteSearchResult>?>(null)
     val routeSearchState: StateFlow<UiState<RouteSearchResult>?> = _routeSearchState.asStateFlow()
 
     private val _selectedRoute = MutableStateFlow<RouteOption?>(null)
     val selectedRoute: StateFlow<RouteOption?> = _selectedRoute.asStateFlow()
+
+    private val _routeProgress = MutableStateFlow<RouteProgress?>(null)
+    val routeProgress: StateFlow<RouteProgress?> = _routeProgress.asStateFlow()
+
+    private val _arrivedJourneyId = MutableStateFlow<String?>(null)
+    val arrivedJourneyId: StateFlow<String?> = _arrivedJourneyId.asStateFlow()
 
     private val _activeBreadcrumbs = MutableStateFlow<List<LatLon>>(emptyList())
     val activeBreadcrumbs: StateFlow<List<LatLon>> = _activeBreadcrumbs.asStateFlow()
@@ -115,6 +153,11 @@ class NirapadViewModel(
     private var shareLookupJob: Job? = null
     private var lastPrefetchedLocation: LatLon? = null
     private var prefetchJob: Job? = null
+    private var lastReverseGeocodeLoc: LatLon? = null
+    private var lastReverseGeocodeAtMs = 0L
+    private var lastContextFetchLoc: LatLon? = null
+    private var lastContextFetchAtMs = 0L
+    private val dismissedArrivalJourneyIds = mutableSetOf<String>()
 
     val tileCacheStats: StateFlow<MapTileCacheStats> = (mapTileCache?.statsFlow ?: flowOf(MapTileCacheStats()))
         .catch { e ->
@@ -233,6 +276,47 @@ class NirapadViewModel(
                 _adminCheckCompleted.value = true
             }
         }
+
+        // Debounced Nominatim Place Autocomplete
+        viewModelScope.launch {
+            _autocompleteInput
+                .map { it.trim() }
+                .distinctUntilChanged()
+                .debounce(420L)
+                .collect { query ->
+                    if (query.length < 2) {
+                        _placeSuggestions.value = emptyList()
+                        _isSearchingPlaces.value = false
+                        return@collect
+                    }
+                    _isSearchingPlaces.value = true
+                    try {
+                        val remote = freeApisClient.searchPlacesIndia(query)
+                        val presetFallback = RoutingAndSafetyEngine.destinationPresets
+                            .filter { it.label.contains(query, ignoreCase = true) }
+                            .map {
+                                PlaceSuggestion(
+                                    placeId = "preset_${it.label}",
+                                    shortName = it.label,
+                                    displayName = "${it.label}, ${it.areaNote}",
+                                    locality = it.areaNote,
+                                    lat = it.lat,
+                                    lon = it.lon,
+                                    isFromPreset = true
+                                )
+                            }
+                        _placeSuggestions.value = (remote + presetFallback)
+                            .distinctBy { it.shortName.lowercase() + ":" + (it.lat * 100).toInt() }
+                            .take(6)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Nominatim autocomplete failed: ${e.message}")
+                    } finally {
+                        _isSearchingPlaces.value = false
+                    }
+                }
+        }
     }
 
     fun clearBanner() {
@@ -250,18 +334,36 @@ class NirapadViewModel(
     fun onLiveLocationReading(reading: LocationReading) {
         _currentLocation.value = reading
         _hasLiveGpsFix.value = true
+        val pt = LatLon(reading.lat, reading.lon)
         if (reading.accuracyMeters <= 250.0) {
-            maybePrefetchArea(LatLon(reading.lat, reading.lon))
+            maybePrefetchArea(pt)
+            maybeRefreshEnvironmentAndLocality(pt)
         }
 
         val activeJourney = (journeysState.value as? UiState.Success)?.data
             ?.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
-            ?: return
+
+        if (activeJourney == null) {
+            _routeProgress.value = null
+            _arrivedJourneyId.value = null
+            return
+        }
+
+        // Update dynamic remaining polyline, distance, ETA, turn-by-turn step & 35m arrival detection
+        val progress = RoutingAndSafetyEngine.computeRouteProgress(
+            currentLocation = pt,
+            route = _selectedRoute.value,
+            destination = LatLon(activeJourney.destinationLat, activeJourney.destinationLon),
+            arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS
+        )
+        _routeProgress.value = progress
+        if (progress.hasArrived && activeJourney.id !in dismissedArrivalJourneyIds) {
+            _arrivedJourneyId.value = activeJourney.id
+        }
 
         // Avoid noisy excessive GPS writes if jitter accuracy is very poor (> 150m)
         if (reading.accuracyMeters > 150.0) return
 
-        val pt = LatLon(reading.lat, reading.lon)
         _activeBreadcrumbs.value = (_activeBreadcrumbs.value + pt).takeLast(50)
 
         val geom = _selectedRoute.value?.geometry ?: listOf(
@@ -283,6 +385,7 @@ class NirapadViewModel(
 
         locationSequence += 1L
         val seq = locationSequence
+        val readableLoc = _currentAddressLabel.value.orEmpty()
         viewModelScope.launch {
             try {
                 repository.recordLocationUpdate(
@@ -291,7 +394,8 @@ class NirapadViewModel(
                     lon = reading.lon,
                     accuracyMeters = reading.accuracyMeters,
                     sequence = seq,
-                    nextState = if (shouldFlagDeviation) JourneyState.DEVIATION_DETECTED else null
+                    nextState = if (shouldFlagDeviation) JourneyState.DEVIATION_DETECTED else null,
+                    locationLabel = readableLoc
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -301,8 +405,72 @@ class NirapadViewModel(
         }
     }
 
+    private fun maybeRefreshEnvironmentAndLocality(center: LatLon) {
+        val now = System.currentTimeMillis()
+        val prevRev = lastReverseGeocodeLoc
+        val movedRev = prevRev == null ||
+            RoutingAndSafetyEngine.haversineMeters(prevRev.lat, prevRev.lon, center.lat, center.lon) >= 120.0
+        if (movedRev && (now - lastReverseGeocodeAtMs) >= 18_000L) {
+            lastReverseGeocodeLoc = center
+            lastReverseGeocodeAtMs = now
+            viewModelScope.launch {
+                val placeName = freeApisClient.reverseGeocode(center.lat, center.lon)
+                if (!placeName.isNullOrBlank()) {
+                    _currentAddressLabel.value = placeName
+                }
+            }
+        }
+
+        val prevCtx = lastContextFetchLoc
+        val movedCtx = prevCtx == null ||
+            RoutingAndSafetyEngine.haversineMeters(prevCtx.lat, prevCtx.lon, center.lat, center.lon) >= 800.0
+        if (movedCtx && (now - lastContextFetchAtMs) >= 60_000L) {
+            lastContextFetchLoc = center
+            lastContextFetchAtMs = now
+            refreshOverpassAndWeather(center.lat, center.lon)
+        }
+    }
+
+    fun refreshOverpassAndWeather(
+        lat: Double = _currentLocation.value.lat,
+        lon: Double = _currentLocation.value.lon
+    ) {
+        viewModelScope.launch {
+            _isLoadingPoliceStations.value = true
+            try {
+                val police = freeApisClient.fetchNearbyPoliceStations(lat, lon, radiusMeters = 8000)
+                if (police.isNotEmpty() || _nearbyPoliceStations.value.isEmpty()) {
+                    _nearbyPoliceStations.value = police
+                }
+                val weather = freeApisClient.fetchWeatherContext(lat, lon)
+                if (weather != null) {
+                    _weatherContext.value = weather
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Police/weather refresh failed: ${e.message}")
+            } finally {
+                _isLoadingPoliceStations.value = false
+            }
+        }
+    }
+
     fun updateDestinationQuery(query: String) {
         _destinationQuery.value = query
+        _selectedPlaceSuggestion.value = null
+        _autocompleteInput.value = query
+    }
+
+    fun selectPlaceSuggestion(suggestion: PlaceSuggestion) {
+        _selectedPlaceSuggestion.value = suggestion
+        _destinationQuery.value = suggestion.shortName
+        _autocompleteInput.value = ""
+        _placeSuggestions.value = emptyList()
+    }
+
+    fun dismissPlaceSuggestions() {
+        _placeSuggestions.value = emptyList()
     }
 
     fun searchRoutes(queryOverride: String? = null) {
@@ -311,22 +479,34 @@ class NirapadViewModel(
             _bannerMessage.value = "Enter a destination to compare routes."
             return
         }
+        val activeSelectedPlace = if (queryOverride == null) {
+            _selectedPlaceSuggestion.value?.takeIf { it.shortName.equals(query, ignoreCase = true) }
+        } else {
+            null
+        }
         _destinationQuery.value = query
+        _placeSuggestions.value = emptyList()
         _routeSearchState.value = UiState.Loading
         viewModelScope.launch {
             try {
                 val loc = _currentLocation.value
+                val originLabel = _currentAddressLabel.value
+                    ?: if (_hasLiveGpsFix.value) "Current GPS Location" else "Central Reference Point"
                 val combinedFacilities = RoutingAndSafetyEngine.verifiedNationalHelplines + firestoreFacilitiesState.value
                 val result = RoutingAndSafetyEngine.searchRoutes(
-                    originLabel = if (_hasLiveGpsFix.value) "Current GPS Location" else "Central Reference Point",
+                    originLabel = originLabel,
                     origin = LatLon(loc.lat, loc.lon),
                     destinationQuery = query,
                     verifiedReports = verifiedReportsState.value,
-                    facilities = combinedFacilities
+                    facilities = combinedFacilities,
+                    selectedPlace = activeSelectedPlace,
+                    apiClient = freeApisClient
                 )
+                result.weatherContext?.let { _weatherContext.value = it }
                 _routeSearchState.value = UiState.Success(result)
                 _selectedRoute.value = result.routes.firstOrNull()
                 prefetchRouteCorridorTiles(result.routes)
+                refreshOverpassAndWeather(loc.lat, loc.lon)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -354,21 +534,26 @@ class NirapadViewModel(
         }
         _destinationQuery.value = query
         _advisoryTravelWindow.value = travelWindowLabel
+        _placeSuggestions.value = emptyList()
         _routeSearchState.value = UiState.Loading
         _advisoryComparisonState.value = UiState.Loading
 
         viewModelScope.launch {
             try {
                 val loc = _currentLocation.value
-                val originLabel = if (_hasLiveGpsFix.value) "Current GPS Location" else "Central Reference Point"
+                val originLabel = _currentAddressLabel.value
+                    ?: if (_hasLiveGpsFix.value) "Current GPS Location" else "Central Reference Point"
                 val combinedFacilities = RoutingAndSafetyEngine.verifiedNationalHelplines + firestoreFacilitiesState.value
                 val searchResult = RoutingAndSafetyEngine.searchRoutes(
                     originLabel = originLabel,
                     origin = LatLon(loc.lat, loc.lon),
                     destinationQuery = query,
                     verifiedReports = verifiedReportsState.value,
-                    facilities = combinedFacilities
+                    facilities = combinedFacilities,
+                    selectedPlace = _selectedPlaceSuggestion.value,
+                    apiClient = freeApisClient
                 )
+                searchResult.weatherContext?.let { _weatherContext.value = it }
                 _routeSearchState.value = UiState.Success(searchResult)
 
                 val comparison = aiAdvisor.compareRoutes(
@@ -428,6 +613,13 @@ class NirapadViewModel(
                 )
                 _activeBreadcrumbs.value = listOf(searchResult.origin)
                 _deviationDistanceM.value = 0
+                _arrivedJourneyId.value = null
+                _routeProgress.value = RoutingAndSafetyEngine.computeRouteProgress(
+                    currentLocation = searchResult.origin,
+                    route = route,
+                    destination = searchResult.destination,
+                    arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS
+                )
                 _bannerMessage.value = "Protected journey started (${journeyId.take(6)})."
                 maybePrefetchArea(searchResult.origin, force = true)
                 prefetchRouteCorridorTiles(listOf(route))
@@ -489,11 +681,19 @@ class NirapadViewModel(
         }
     }
 
+    fun dismissArrivalModal(journeyId: String) {
+        dismissedArrivalJourneyIds.add(journeyId)
+        _arrivedJourneyId.value = null
+    }
+
     fun endJourney(journey: Journey) {
         viewModelScope.launch {
             try {
                 repository.transitionJourneyState(journey, JourneyState.COMPLETED)
-                _bannerMessage.value = "Journey ended. Live sharing stopped & revoked."
+                _arrivedJourneyId.value = null
+                _routeProgress.value = null
+                _activeBreadcrumbs.value = emptyList()
+                _bannerMessage.value = "Destination reached — Journey completed & live sharing closed."
             } catch (e: Exception) {
                 _bannerMessage.value = e.localizedMessage ?: "Failed to end journey"
             }
@@ -769,6 +969,11 @@ class NirapadViewModel(
         _language.value = language
         viewModelScope.launch {
             try {
+                repository.ensureUserProfile(
+                    uid = currentUserId,
+                    displayName = displayName.ifBlank { currentUserName },
+                    email = currentUserEmail
+                )
                 repository.updateUserSettings(
                     uid = currentUserId,
                     displayName = displayName,
@@ -777,6 +982,8 @@ class NirapadViewModel(
                     retentionDays = retentionDays
                 )
                 _bannerMessage.value = "Settings saved."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _bannerMessage.value = e.localizedMessage ?: "Failed to save settings"
             }

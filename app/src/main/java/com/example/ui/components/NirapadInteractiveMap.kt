@@ -122,10 +122,13 @@ import com.example.data.cache.MapTileCache
 import com.example.data.cache.MapTileCacheStats
 import com.example.data.cache.SlippyMapMath
 import com.example.data.cache.TileOrigin
+import com.example.data.model.ColoredRouteSegment
 import com.example.data.model.EmergencyFacility
 import com.example.data.model.LatLon
+import com.example.data.model.NearbyPoliceStation
 import com.example.data.model.RouteOption
 import com.example.data.model.SafetyTier
+import com.example.data.model.SegmentSafetyLevel
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
@@ -212,7 +215,9 @@ fun NirapadMapCanvas(
     destinationQuery: String? = null,
     onDestinationQueryChange: ((String) -> Unit)? = null,
     onSearchDestination: ((String?) -> Unit)? = null,
-    onRequestLocationPermission: (() -> Unit)? = null
+    onRequestLocationPermission: (() -> Unit)? = null,
+    remainingPolyline: List<LatLon>? = null,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList()
 ) {
     val context = LocalContext.current
     val isInspection = LocalInspectionMode.current
@@ -430,6 +435,8 @@ fun NirapadMapCanvas(
                 onTapMap = if (expandable) {
                     { isExpanded = true }
                 } else null,
+                remainingPolyline = remainingPolyline,
+                nearbyPoliceStations = nearbyPoliceStations,
                 modifier = Modifier.fillMaxSize()
             )
             InlineMapOverlays(
@@ -478,6 +485,8 @@ fun NirapadMapCanvas(
                 onTapMap = if (expandable) {
                     { isExpanded = true }
                 } else null,
+                remainingPolyline = remainingPolyline,
+                nearbyPoliceStations = nearbyPoliceStations,
                 modifier = Modifier.fillMaxSize()
             ) { renderedTileCount, isOnline ->
                 InlineMapOverlays(
@@ -543,6 +552,8 @@ fun NirapadMapCanvas(
                             hasFittedRoutes = true
                         },
                         onTapMap = null,
+                        remainingPolyline = remainingPolyline,
+                        nearbyPoliceStations = nearbyPoliceStations,
                         modifier = Modifier.fillMaxSize()
                     )
                     FullscreenMapOverlays(
@@ -605,6 +616,8 @@ fun NirapadMapCanvas(
                             cameraZoom = nextZoom.toDouble().coerceIn(MIN_INTERACTIVE_ZOOM, MAX_INTERACTIVE_ZOOM)
                         },
                         onTapMap = null,
+                        remainingPolyline = remainingPolyline,
+                        nearbyPoliceStations = nearbyPoliceStations,
                         modifier = Modifier.fillMaxSize()
                     ) { renderedTileCount, isOnline ->
                         FullscreenMapOverlays(
@@ -1064,6 +1077,8 @@ private fun OsmDroidMapLayer(
     onUserDraggedMap: () -> Unit,
     onFittedInitialBounds: (LatLon, Double) -> Unit,
     onTapMap: (() -> Unit)?,
+    remainingPolyline: List<LatLon>? = null,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1244,9 +1259,14 @@ private fun OsmDroidMapLayer(
             // Alternative routes first, selected route on top
             val ordered = routes.sortedBy { it.id == selectedRouteId }
             ordered.forEach { route ->
-                if (route.geometry.size >= 2) {
-                    val isSelected = route.id == selectedRouteId
-                    val geoPts = route.geometry.map { GeoPoint(it.lat, it.lon) }
+                val isSelected = route.id == selectedRouteId
+                val activeGeom = if (isSelected && !remainingPolyline.isNullOrEmpty() && remainingPolyline.size >= 2) {
+                    remainingPolyline
+                } else {
+                    route.geometry
+                }
+                if (activeGeom.size >= 2) {
+                    val geoPts = activeGeom.map { GeoPoint(it.lat, it.lon) }
                     if (isSelected) {
                         val casing = Polyline(view).apply {
                             setPoints(geoPts)
@@ -1257,22 +1277,43 @@ private fun OsmDroidMapLayer(
                         }
                         routeOverlays.add(casing)
                     }
-                    val line = Polyline(view).apply {
-                        setPoints(geoPts)
-                        outlinePaint.color = when {
-                            !isSelected -> ALT_SLATE_INT
-                            route.safetyTier == SafetyTier.LIMITED_DATA -> CAUTION_AMBER_INT
-                            else -> PRIMARY_TEAL_INT
+                    if (isSelected && route.coloredSegments.isNotEmpty() && remainingPolyline.isNullOrEmpty()) {
+                        route.coloredSegments.forEach { seg ->
+                            if (seg.points.size >= 2) {
+                                val segLine = Polyline(view).apply {
+                                    setPoints(seg.points.map { GeoPoint(it.lat, it.lon) })
+                                    outlinePaint.color = when (seg.safetyLevel) {
+                                        SegmentSafetyLevel.HIGH_CROWD_LIT -> POSITIVE_GREEN_INT
+                                        SegmentSafetyLevel.MODERATE_ACTIVITY -> PRIMARY_TEAL_INT
+                                        SegmentSafetyLevel.LOW_CROWD_ISOLATED -> CAUTION_AMBER_INT
+                                    }
+                                    outlinePaint.strokeWidth = 11f
+                                    outlinePaint.strokeCap = Paint.Cap.ROUND
+                                    outlinePaint.strokeJoin = Paint.Join.ROUND
+                                    title = route.label
+                                }
+                                routeOverlays.add(segLine)
+                            }
                         }
-                        outlinePaint.strokeWidth = if (isSelected) 11f else 6.5f
-                        outlinePaint.strokeCap = Paint.Cap.ROUND
-                        outlinePaint.strokeJoin = Paint.Join.ROUND
-                        if (!isSelected) {
-                            outlinePaint.pathEffect = DashPathEffect(floatArrayOf(18f, 12f), 0f)
+                    } else {
+                        val line = Polyline(view).apply {
+                            setPoints(geoPts)
+                            outlinePaint.color = when {
+                                !isSelected -> ALT_SLATE_INT
+                                route.safetyTier == SafetyTier.LIMITED_DATA -> CAUTION_AMBER_INT
+                                route.safetyTier == SafetyTier.HIGHER_CONTEXT -> POSITIVE_GREEN_INT
+                                else -> PRIMARY_TEAL_INT
+                            }
+                            outlinePaint.strokeWidth = if (isSelected) 11f else 6.5f
+                            outlinePaint.strokeCap = Paint.Cap.ROUND
+                            outlinePaint.strokeJoin = Paint.Join.ROUND
+                            if (!isSelected) {
+                                outlinePaint.pathEffect = DashPathEffect(floatArrayOf(18f, 12f), 0f)
+                            }
+                            title = route.label
                         }
-                        title = route.label
+                        routeOverlays.add(line)
                     }
-                    routeOverlays.add(line)
                 }
             }
 
@@ -1293,6 +1334,21 @@ private fun OsmDroidMapLayer(
                     position = GeoPoint(fac.lat, fac.lon)
                     title = fac.name
                     snippet = "${fac.type} • ${fac.phone}"
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                }
+                routeOverlays.add(marker)
+            }
+
+            // Real nearby OSM Overpass Police Stations
+            nearbyPoliceStations.take(8).forEach { st ->
+                val marker = Marker(view).apply {
+                    position = GeoPoint(st.lat, st.lon)
+                    title = st.name
+                    val distKm = String.format(Locale.US, "%.1f km", st.distanceMeters / 1000.0)
+                    snippet = buildString {
+                        append("Police • $distKm")
+                        if (!st.phone.isNullOrBlank()) append(" • ${st.phone}")
+                    }
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 }
                 routeOverlays.add(marker)
@@ -1445,6 +1501,8 @@ private fun InteractiveFallbackCanvasLayer(
     onFittedInitialBounds: (LatLon, Float) -> Unit,
     onUserGestureCamera: (LatLon, Float, Boolean) -> Unit,
     onTapMap: (() -> Unit)?,
+    remainingPolyline: List<LatLon>? = null,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
     modifier: Modifier = Modifier,
     overlays: @Composable androidx.compose.foundation.layout.BoxScope.(renderedTileCount: Int, isOnline: Boolean) -> Unit
 ) {
@@ -1605,20 +1663,20 @@ private fun InteractiveFallbackCanvasLayer(
 
             val ordered = routes.sortedBy { it.id == selectedRouteId }
             ordered.forEach { route ->
-                if (route.geometry.size >= 2) {
-                    val isSelected = route.id == selectedRouteId
+                val isSelected = route.id == selectedRouteId
+                val activeGeom = if (isSelected && !remainingPolyline.isNullOrEmpty() && remainingPolyline.size >= 2) {
+                    remainingPolyline
+                } else {
+                    route.geometry
+                }
+                if (activeGeom.size >= 2) {
                     val path = Path().apply {
-                        val first = project(route.geometry.first())
+                        val first = project(activeGeom.first())
                         moveTo(first.x, first.y)
-                        route.geometry.drop(1).forEach { pt ->
+                        activeGeom.drop(1).forEach { pt ->
                             val o = project(pt)
                             lineTo(o.x, o.y)
                         }
-                    }
-                    val color = when {
-                        !isSelected -> Color(0xFF627D98)
-                        route.safetyTier == SafetyTier.LIMITED_DATA -> NirapadCautionAmber
-                        else -> NirapadPrimaryTeal
                     }
                     if (isSelected) {
                         drawPath(
@@ -1627,15 +1685,46 @@ private fun InteractiveFallbackCanvasLayer(
                             style = Stroke(width = 16f, cap = StrokeCap.Round)
                         )
                     }
-                    drawPath(
-                        path = path,
-                        color = color,
-                        style = Stroke(
-                            width = if (isSelected) 10f else 5f,
-                            cap = StrokeCap.Round,
-                            pathEffect = if (isSelected) null else PathEffect.dashPathEffect(floatArrayOf(16f, 12f))
+                    if (isSelected && route.coloredSegments.isNotEmpty() && remainingPolyline.isNullOrEmpty()) {
+                        route.coloredSegments.forEach { seg ->
+                            if (seg.points.size >= 2) {
+                                val segPath = Path().apply {
+                                    val first = project(seg.points.first())
+                                    moveTo(first.x, first.y)
+                                    seg.points.drop(1).forEach { pt ->
+                                        val o = project(pt)
+                                        lineTo(o.x, o.y)
+                                    }
+                                }
+                                val segColor = when (seg.safetyLevel) {
+                                    SegmentSafetyLevel.HIGH_CROWD_LIT -> NirapadPositiveGreen
+                                    SegmentSafetyLevel.MODERATE_ACTIVITY -> NirapadPrimaryTeal
+                                    SegmentSafetyLevel.LOW_CROWD_ISOLATED -> NirapadCautionAmber
+                                }
+                                drawPath(
+                                    path = segPath,
+                                    color = segColor,
+                                    style = Stroke(width = 10f, cap = StrokeCap.Round)
+                                )
+                            }
+                        }
+                    } else {
+                        val color = when {
+                            !isSelected -> Color(0xFF627D98)
+                            route.safetyTier == SafetyTier.LIMITED_DATA -> NirapadCautionAmber
+                            route.safetyTier == SafetyTier.HIGHER_CONTEXT -> NirapadPositiveGreen
+                            else -> NirapadPrimaryTeal
+                        }
+                        drawPath(
+                            path = path,
+                            color = color,
+                            style = Stroke(
+                                width = if (isSelected) 10f else 5f,
+                                cap = StrokeCap.Round,
+                                pathEffect = if (isSelected) null else PathEffect.dashPathEffect(floatArrayOf(16f, 12f))
+                            )
                         )
-                    )
+                    }
                 }
             }
 
@@ -1659,6 +1748,12 @@ private fun InteractiveFallbackCanvasLayer(
                 val o = project(LatLon(fac.lat, fac.lon))
                 drawCircle(Color.White, radius = 11f, center = o)
                 drawCircle(NirapadPositiveGreen, radius = 7f, center = o)
+            }
+
+            nearbyPoliceStations.take(8).forEach { st ->
+                val o = project(LatLon(st.lat, st.lon))
+                drawCircle(Color.White, radius = 12f, center = o)
+                drawCircle(NirapadNavyDark, radius = 8f, center = o)
             }
 
             routes.firstOrNull { it.id == selectedRouteId }?.geometry?.lastOrNull()?.let { dest ->

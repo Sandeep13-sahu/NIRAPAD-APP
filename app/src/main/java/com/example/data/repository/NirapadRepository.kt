@@ -24,6 +24,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -59,19 +60,39 @@ class NirapadRepository(
         val docRef = db.collection("users").document(uid)
         return try {
             val snap = docRef.get().await()
+            val cleanInputName = displayName.trim().take(100)
+            val cleanInputEmail = email.trim().take(160)
             if (snap.exists()) {
-                snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-                    ?: UserProfile(id = uid, userId = uid, displayName = displayName, email = email)
+                val existing = snap.toObject(UserProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    ?: UserProfile(id = uid, userId = uid, displayName = cleanInputName, email = cleanInputEmail)
+                val resolvedName = cleanInputName
+                    .takeIf { it.isNotBlank() && it != "Traveller" }
+                    ?: existing.displayName.ifBlank { cleanInputName }.ifBlank { "Traveller" }
+                val resolvedEmail = cleanInputEmail.ifBlank { existing.email }
+                if (resolvedName != existing.displayName || resolvedEmail != existing.email) {
+                    docRef.set(
+                        mapOf(
+                            "displayName" to resolvedName.take(100),
+                            "email" to resolvedEmail.take(160),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        ),
+                        SetOptions.merge()
+                    ).await()
+                }
+                existing.copy(id = uid, displayName = resolvedName, email = resolvedEmail)
             } else {
+                val fallbackName = cleanInputName.ifBlank {
+                    cleanInputEmail.substringBefore("@").ifBlank { "Traveller" }
+                }
                 val profile = UserProfile(
                     userId = uid,
-                    displayName = displayName.ifBlank { "Traveller" },
-                    email = email,
+                    displayName = fallbackName.take(100),
+                    email = cleanInputEmail,
                     language = "en",
                     deviationThresholdMeters = 250L,
                     retentionDays = 30L
                 )
-                docRef.set(profile.toCreateMap(uid)).await()
+                docRef.set(profile.toCreateMap(uid), SetOptions.merge()).await()
                 profile.copy(id = uid)
             }
         } catch (e: CancellationException) {
@@ -287,7 +308,8 @@ class NirapadRepository(
         lon: Double,
         accuracyMeters: Double,
         sequence: Long,
-        nextState: JourneyState? = null
+        nextState: JourneyState? = null,
+        locationLabel: String = ""
     ) {
         val uid = requireUserId()
         val currentState = JourneyState.fromValue(journey.state)
@@ -326,12 +348,17 @@ class NirapadRepository(
             ).await()
 
             if (journey.sharingEnabled && journey.shareTokenId.isNotBlank()) {
+                val shareText = if (locationLabel.isNotBlank()) {
+                    "$locationLabel • To ${journey.destinationLabel}"
+                } else {
+                    "Heading toward ${journey.destinationLabel}"
+                }.take(160)
                 db.collection("share_tokens").document(journey.shareTokenId).update(
                     mapOf(
                         "journeyState" to resolvedState.value,
                         "lastLat" to lat.coerceIn(-90.0, 90.0),
                         "lastLon" to lon.coerceIn(-180.0, 180.0),
-                        "lastLocationText" to "Heading toward ${journey.destinationLabel}".take(160),
+                        "lastLocationText" to shareText,
                         "lastUpdatedAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )

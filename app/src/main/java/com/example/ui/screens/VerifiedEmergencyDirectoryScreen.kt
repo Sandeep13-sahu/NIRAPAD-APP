@@ -78,6 +78,7 @@ import com.example.data.model.DataProvenance
 import com.example.data.model.DirectoryFacilityItem
 import com.example.data.model.EmergencyDirectoryCategory
 import com.example.data.model.EmergencyFacility
+import com.example.data.model.NearbyPoliceStation
 import com.example.data.repository.NirapadRepository
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
@@ -118,7 +119,10 @@ fun VerifiedEmergencyDirectoryScreen(
     onRefreshDirectory: (EmergencyDirectoryCategory, Double?) -> Unit,
     onAddVerifiedFacility: (String, String, String, String, String) -> Unit,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
+    isLoadingPoliceStations: Boolean = false,
+    onRefreshPoliceStations: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedCategory by remember { mutableStateOf(EmergencyDirectoryCategory.ALL) }
@@ -312,7 +316,10 @@ fun VerifiedEmergencyDirectoryScreen(
                                 }
                             }
                             IconButton(
-                                onClick = { onRefreshDirectory(selectedCategory, selectedRadiusKm) },
+                                onClick = {
+                                    onRefreshDirectory(selectedCategory, selectedRadiusKm)
+                                    onRefreshPoliceStations()
+                                },
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
                                     .testTag("dir_refresh_button")
@@ -434,6 +441,95 @@ fun VerifiedEmergencyDirectoryScreen(
                                 label = { Text(label) },
                                 modifier = Modifier.testTag(tag)
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Real-time OSM Overpass Police Stations (8 km)
+        if ((selectedCategory == EmergencyDirectoryCategory.ALL || selectedCategory == EmergencyDirectoryCategory.POLICE) &&
+            (nearbyPoliceStations.isNotEmpty() || isLoadingPoliceStations)
+        ) {
+            val filteredPolice = nearbyPoliceStations.filter { st ->
+                val q = searchQuery.trim().lowercase()
+                q.isEmpty() || st.name.lowercase().contains(q) || st.locality.lowercase().contains(q)
+            }
+            if (filteredPolice.isNotEmpty() || isLoadingPoliceStations) {
+                item {
+                    Text(
+                        text = "Nearby Police Stations via OpenStreetMap (${filteredPolice.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = NirapadNavyDark
+                    )
+                }
+                if (isLoadingPoliceStations && filteredPolice.isEmpty()) {
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = NirapadPrimaryTeal)
+                            Text("Finding police stations within 8 km...", style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+                        }
+                    }
+                } else {
+                    items(filteredPolice, key = { "osm_${it.id}" }) { st ->
+                        val dialNum = st.phone?.takeIf { it.isNotBlank() } ?: "112"
+                        val callLabel = if (!st.phone.isNullOrBlank()) "Call Station (${st.phone})" else "Call 112"
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = NirapadSurface),
+                            border = BorderStroke(1.dp, NirapadBorderSubtle),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("dir_police_card_${st.id}")
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(st.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = NirapadNavyDark, modifier = Modifier.weight(1f))
+                                    Surface(color = NirapadPrimaryTealContainer, shape = RoundedCornerShape(8.dp)) {
+                                        Text(
+                                            text = String.format(Locale.US, "%.1f km away", st.distanceMeters / 1000.0),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NirapadPrimaryTeal,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                                Text(st.locality, style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$dialNum"))) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark, contentColor = Color.White),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("dir_call_police_${st.id}")
+                                    ) {
+                                        Icon(Icons.Default.Call, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(callLabel, color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val geoUri = Uri.parse("geo:${st.lat},${st.lon}?q=${st.lat},${st.lon}(${Uri.encode(st.name)})")
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
+                                        },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.minimumInteractiveComponentSize()
+                                    ) {
+                                        Icon(Icons.Default.Map, contentDescription = "Open map for ${st.name}", modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Map")
+                                    }
+                                }
+                            }
                         }
                     }
                 }

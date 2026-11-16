@@ -330,6 +330,71 @@ data class AuditLog(
 
 data class LatLon(val lat: Double, val lon: Double)
 
+data class PlaceSuggestion(
+    val placeId: String,
+    val shortName: String,
+    val displayName: String,
+    val locality: String,
+    val lat: Double,
+    val lon: Double,
+    val isFromPreset: Boolean = false
+)
+
+enum class CrowdActivityTier(val label: String) {
+    HIGH_CROWD_WELL_LIT("High Crowd & Well-Lit (Safest)"),
+    MODERATE_ACTIVITY("Moderate Activity"),
+    LOW_CROWD_ISOLATED("Low Crowd / Isolated Stretch")
+}
+
+enum class SegmentSafetyLevel {
+    HIGH_CROWD_LIT,
+    MODERATE_ACTIVITY,
+    LOW_CROWD_ISOLATED
+}
+
+data class ColoredRouteSegment(
+    val points: List<LatLon>,
+    val safetyLevel: SegmentSafetyLevel
+)
+
+data class NavigationStep(
+    val instruction: String,
+    val roadName: String,
+    val maneuverType: String,
+    val maneuverModifier: String,
+    val distanceMeters: Int,
+    val durationSeconds: Int,
+    val location: LatLon
+)
+
+data class NearbyPoliceStation(
+    val id: String,
+    val name: String,
+    val phone: String?,
+    val locality: String,
+    val lat: Double,
+    val lon: Double,
+    val distanceMeters: Double
+)
+
+data class WeatherContext(
+    val temperatureCelsius: Double,
+    val precipitationMm: Double,
+    val isDay: Boolean,
+    val conditionLabel: String,
+    val fetchedAtMillis: Long
+)
+
+data class RouteProgress(
+    val remainingPolyline: List<LatLon>,
+    val remainingDistanceMeters: Int,
+    val remainingDurationSeconds: Int,
+    val distanceToDestinationMeters: Double,
+    val activeStep: NavigationStep?,
+    val distanceToNextStepMeters: Int,
+    val hasArrived: Boolean
+)
+
 data class SafetyFactor(
     val id: String,
     val title: String,
@@ -360,7 +425,14 @@ data class RouteOption(
     val freshnessNote: String,
     val caveat: String,
     val factors: List<SafetyFactor>,
-    val geometry: List<LatLon>
+    val geometry: List<LatLon>,
+    val steps: List<NavigationStep> = emptyList(),
+    val coloredSegments: List<ColoredRouteSegment> = emptyList(),
+    val crowdActivityTier: CrowdActivityTier = CrowdActivityTier.MODERATE_ACTIVITY,
+    val crowdPoiCount: Int = 0,
+    val litCount: Int = 0,
+    val nearbyPoliceCount: Int = 0,
+    val isNightTime: Boolean = false
 )
 
 data class RouteSearchResult(
@@ -370,7 +442,8 @@ data class RouteSearchResult(
     val destination: LatLon,
     val routes: List<RouteOption>,
     val providerBanner: String,
-    val hasProviderWarning: Boolean
+    val hasProviderWarning: Boolean,
+    val weatherContext: WeatherContext? = null
 )
 
 data class AdvisoryRouteComparisonItem(

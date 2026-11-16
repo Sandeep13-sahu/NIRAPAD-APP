@@ -105,6 +105,7 @@ import com.example.ui.components.AiAdvisorModal
 import com.example.ui.components.DeliberateSosFab
 import com.example.ui.screens.AdminModerationWorkspaceScreen
 import com.example.ui.screens.AdvisoryAiNavigationScreen
+import com.example.ui.screens.AnimatedSplashScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.EmergencyScreen
 import com.example.ui.screens.HomeScreen
@@ -150,28 +151,65 @@ private data class NavDestination(
     val testTag: String
 )
 
+private sealed interface LaunchGateState {
+    data object Splash : LaunchGateState
+    data object Unauthenticated : LaunchGateState
+    data class Authenticated(
+        val uid: String,
+        val displayName: String,
+        val email: String
+    ) : LaunchGateState
+}
+
 @Composable
-fun AppNavigation(auth: FirebaseAuth = Firebase.auth) {
+fun AppNavigation(
+    auth: FirebaseAuth = Firebase.auth,
+    splashDurationMillis: Long = 2000L
+) {
     val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    var showSplash by remember { mutableStateOf(true) }
+
+    val gateState: LaunchGateState = when {
+        showSplash -> LaunchGateState.Splash
+        currentUser != null -> {
+            val active = currentUser!!
+            val resolvedName = active.displayName?.trim()?.takeIf { it.isNotBlank() }
+                ?: active.email?.substringBefore("@")?.takeIf { it.isNotBlank() }
+                ?: "Traveller"
+            LaunchGateState.Authenticated(
+                uid = active.uid,
+                displayName = resolvedName,
+                email = active.email ?: ""
+            )
+        }
+        else -> LaunchGateState.Unauthenticated
+    }
 
     AnimatedContent(
-        targetState = currentUser?.uid,
+        targetState = gateState,
         transitionSpec = {
-            (fadeIn(animationSpec = tween(320)) + scaleIn(initialScale = 0.97f, animationSpec = tween(320)))
-                .togetherWith(fadeOut(animationSpec = tween(220)))
+            fadeIn(animationSpec = tween(420)).togetherWith(fadeOut(animationSpec = tween(320)))
         },
-        label = "auth_gate_transition"
-    ) { uid ->
-        val activeUser = auth.currentUser
-        if (uid == null || activeUser == null) {
-            AuthScreen(onAuthSuccess = { /* AuthStateListener drives navigation */ })
-        } else {
-            key(uid) {
-                AuthenticatedNirapadShell(
-                    currentUserId = uid,
-                    userName = activeUser.displayName ?: "Traveller",
-                    userEmail = activeUser.email ?: ""
+        label = "launch_and_auth_gate_transition"
+    ) { state ->
+        when (state) {
+            LaunchGateState.Splash -> {
+                AnimatedSplashScreen(
+                    onSplashFinished = { showSplash = false },
+                    durationMillis = splashDurationMillis
                 )
+            }
+            LaunchGateState.Unauthenticated -> {
+                AuthScreen(onAuthSuccess = { /* AuthStateListener drives navigation */ })
+            }
+            is LaunchGateState.Authenticated -> {
+                key(state.uid) {
+                    AuthenticatedNirapadShell(
+                        currentUserId = state.uid,
+                        userName = state.displayName,
+                        userEmail = state.email
+                    )
+                }
             }
         }
     }
@@ -231,6 +269,14 @@ private fun AuthenticatedNirapadShell(
         currentLocation.copy(bearingDegrees = heading)
     }
     val destinationQuery by viewModel.destinationQuery.collectAsStateWithLifecycle()
+    val currentAddressLabel by viewModel.currentAddressLabel.collectAsStateWithLifecycle()
+    val weatherContext by viewModel.weatherContext.collectAsStateWithLifecycle()
+    val placeSuggestions by viewModel.placeSuggestions.collectAsStateWithLifecycle()
+    val isSearchingPlaces by viewModel.isSearchingPlaces.collectAsStateWithLifecycle()
+    val nearbyPoliceStations by viewModel.nearbyPoliceStations.collectAsStateWithLifecycle()
+    val isLoadingPoliceStations by viewModel.isLoadingPoliceStations.collectAsStateWithLifecycle()
+    val routeProgress by viewModel.routeProgress.collectAsStateWithLifecycle()
+    val arrivedJourneyId by viewModel.arrivedJourneyId.collectAsStateWithLifecycle()
     val routeSearchState by viewModel.routeSearchState.collectAsStateWithLifecycle()
     val selectedRoute by viewModel.selectedRoute.collectAsStateWithLifecycle()
     val breadcrumbs by viewModel.activeBreadcrumbs.collectAsStateWithLifecycle()
@@ -335,6 +381,14 @@ private fun AuthenticatedNirapadShell(
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: NirapadRoutes.HOME
+
+    LaunchedEffect(currentRoute) {
+        if ((currentRoute == NirapadRoutes.EMERGENCY || currentRoute == NirapadRoutes.EMERGENCY_DIRECTORY) &&
+            nearbyPoliceStations.isEmpty()
+        ) {
+            viewModel.refreshOverpassAndWeather()
+        }
+    }
 
     val destinations = listOf(
         NavDestination(NirapadRoutes.HOME, copy.navHome, Icons.Filled.Home, Icons.Outlined.Home, "nav_home"),
@@ -566,7 +620,14 @@ private fun AuthenticatedNirapadShell(
                                         launchSingleTop = true
                                     }
                                 },
-                                onRequestSosConfirm = { openSosActivation(autoStart = true) }
+                                onRequestSosConfirm = { openSosActivation(autoStart = true) },
+                                currentAddressLabel = currentAddressLabel,
+                                weatherContext = weatherContext,
+                                placeSuggestions = placeSuggestions,
+                                isSearchingPlaces = isSearchingPlaces,
+                                onSelectPlaceSuggestion = viewModel::selectPlaceSuggestion,
+                                onDismissSuggestions = viewModel::dismissPlaceSuggestions,
+                                nearbyPoliceStations = nearbyPoliceStations
                             )
                         }
 
@@ -594,7 +655,12 @@ private fun AuthenticatedNirapadShell(
                                     navController.navigate(NirapadRoutes.ADVISORY_NAVIGATION) {
                                         launchSingleTop = true
                                     }
-                                }
+                                },
+                                weatherContext = weatherContext,
+                                placeSuggestions = placeSuggestions,
+                                isSearchingPlaces = isSearchingPlaces,
+                                onSelectPlaceSuggestion = viewModel::selectPlaceSuggestion,
+                                nearbyPoliceStations = nearbyPoliceStations
                             )
                         }
 
@@ -648,7 +714,13 @@ private fun AuthenticatedNirapadShell(
                                 onRevokeShare = viewModel::revokeShare,
                                 onEndJourney = viewModel::endJourney,
                                 onLookupShareToken = viewModel::lookupShareToken,
-                                onGoToPlan = { navigateTab(NirapadRoutes.PLAN) }
+                                onGoToPlan = { navigateTab(NirapadRoutes.PLAN) },
+                                currentAddressLabel = currentAddressLabel,
+                                weatherContext = weatherContext,
+                                routeProgress = routeProgress,
+                                arrivedJourneyId = arrivedJourneyId,
+                                nearbyPoliceStations = nearbyPoliceStations,
+                                onDismissArrival = viewModel::dismissArrivalModal
                             )
                         }
 
@@ -677,7 +749,10 @@ private fun AuthenticatedNirapadShell(
                                     SosLocationSharingService.stop(context)
                                     viewModel.resolveOrCancelSos(session, status)
                                 },
-                                onSubmitReport = viewModel::submitReport
+                                onSubmitReport = viewModel::submitReport,
+                                nearbyPoliceStations = nearbyPoliceStations,
+                                isLoadingPoliceStations = isLoadingPoliceStations,
+                                onRefreshPoliceStations = { viewModel.refreshOverpassAndWeather() }
                             )
                         }
 
@@ -760,7 +835,10 @@ private fun AuthenticatedNirapadShell(
                                 onRequestLocationPermission = { requestLocationAndNotificationPermissions() },
                                 onRefreshDirectory = viewModel::refreshEmergencyDirectory,
                                 onAddVerifiedFacility = viewModel::addVerifiedFacility,
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack() },
+                                nearbyPoliceStations = nearbyPoliceStations,
+                                isLoadingPoliceStations = isLoadingPoliceStations,
+                                onRefreshPoliceStations = { viewModel.refreshOverpassAndWeather() }
                             )
                         }
 

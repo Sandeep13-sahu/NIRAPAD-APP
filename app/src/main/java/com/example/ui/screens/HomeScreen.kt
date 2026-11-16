@@ -18,19 +18,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.GpsOff
 import androidx.compose.material.icons.filled.LocalHospital
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShareLocation
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -43,12 +50,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.EmergencyFacility
 import com.example.data.model.Journey
 import com.example.data.model.JourneyState
 import com.example.data.model.LatLon
+import com.example.data.model.NearbyPoliceStation
+import com.example.data.model.PlaceSuggestion
 import com.example.data.model.RouteOption
+import com.example.data.model.WeatherContext
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
@@ -88,7 +99,14 @@ fun HomeScreen(
     onOpenEmergencyDirectory: () -> Unit,
     onOpenAiAdvisor: () -> Unit,
     onRequestSosConfirm: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentAddressLabel: String? = null,
+    weatherContext: WeatherContext? = null,
+    placeSuggestions: List<PlaceSuggestion> = emptyList(),
+    isSearchingPlaces: Boolean = false,
+    onSelectPlaceSuggestion: (PlaceSuggestion) -> Unit = {},
+    onDismissSuggestions: () -> Unit = {},
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList()
 ) {
     Column(
         modifier = modifier
@@ -113,10 +131,36 @@ fun HomeScreen(
                     onValueChange = onDestinationQueryChange,
                     placeholder = { Text(copy.searchDestinationHint) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (destinationQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    onDestinationQueryChange("")
+                                    onDismissSuggestions()
+                                }
+                            ) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear destination")
+                            }
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().testTag("home_destination_input")
                 )
+
+                if (isSearchingPlaces) {
+                    LinearProgressIndicator(
+                        color = NirapadPrimaryTeal,
+                        modifier = Modifier.fillMaxWidth().height(2.dp)
+                    )
+                }
+
+                if (placeSuggestions.isNotEmpty()) {
+                    PlaceAutocompleteSuggestionsCard(
+                        suggestions = placeSuggestions,
+                        onSelectSuggestion = onSelectPlaceSuggestion
+                    )
+                }
 
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -179,10 +223,12 @@ fun HomeScreen(
             locationPermissionGranted = locationPermissionGranted,
             autoFollowByDefault = routes.isEmpty() || activeJourney != null,
             fullscreenTitle = activeJourney?.let { "Active Journey • ${it.destinationLabel}" } ?: "NIRAPAD Live Safety Map",
+            fullscreenSubtitle = currentAddressLabel,
             destinationQuery = destinationQuery,
             onDestinationQueryChange = onDestinationQueryChange,
             onSearchDestination = onSearchRoutes,
             onRequestLocationPermission = onRequestLocationPermission,
+            nearbyPoliceStations = nearbyPoliceStations,
             modifier = Modifier.height(230.dp)
         )
 
@@ -216,15 +262,23 @@ fun HomeScreen(
                     }
                     Column {
                         Text(
-                            text = if (hasLiveGpsFix) "Live GPS Active" else if (locationPermissionGranted) "Waiting for GPS Fix" else "Location Permission Needed",
+                            text = when {
+                                !currentAddressLabel.isNullOrBlank() -> currentAddressLabel
+                                hasLiveGpsFix -> "Live GPS Active"
+                                locationPermissionGranted -> "Waiting for GPS Fix"
+                                else -> "Location Permission Needed"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                             color = NirapadNavyDark,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("home_current_address_text")
                         )
                         val timeText = when {
                             currentLocation.timestampMillis > 0L -> {
                                 val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                                "Last fix ${fmt.format(Date(currentLocation.timestampMillis))} • ±${currentLocation.accuracyMeters.toInt()}m"
+                                "Live fix ${fmt.format(Date(currentLocation.timestampMillis))} • ±${currentLocation.accuracyMeters.toInt()}m"
                             }
                             locationPermissionGranted -> "Waiting for FusedLocationProviderClient GPS fix..."
                             else -> String.format(
@@ -235,6 +289,37 @@ fun HomeScreen(
                             )
                         }
                         Text(text = timeText, style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+
+                        if (weatherContext != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Surface(
+                                color = if (!weatherContext.isDay) Color(0xFFFEF3C7) else NirapadPrimaryTealContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("home_weather_badge")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (!weatherContext.isDay) Icons.Default.NightsStay else Icons.Default.WbSunny,
+                                        contentDescription = null,
+                                        tint = if (!weatherContext.isDay) NirapadCautionAmber else NirapadPrimaryTeal,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append("${weatherContext.temperatureCelsius.toInt()}°C • ${weatherContext.conditionLabel}")
+                                            if (!weatherContext.isDay) append(" • Night safety priority")
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 if (!locationPermissionGranted) {
@@ -364,6 +449,67 @@ private fun QuickActionCard(
             Icon(icon, contentDescription = null, tint = NirapadPrimaryTeal, modifier = Modifier.size(22.dp))
             Text(title, style = MaterialTheme.typography.labelLarge, color = NirapadNavyDark, fontWeight = FontWeight.SemiBold)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
+        }
+    }
+}
+
+@Composable
+internal fun PlaceAutocompleteSuggestionsCard(
+    suggestions: List<PlaceSuggestion>,
+    onSelectSuggestion: (PlaceSuggestion) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = Color(0xFFFFFFFF),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
+        shadowElevation = 2.dp,
+        modifier = modifier.fillMaxWidth().testTag("autocomplete_suggestions_list")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            suggestions.forEachIndexed { idx, suggestion ->
+                Surface(
+                    onClick = { onSelectSuggestion(suggestion) },
+                    color = Color(0xFFFFFFFF),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .testTag("autocomplete_suggestion_$idx")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = NirapadPrimaryTeal,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = suggestion.shortName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = suggestion.displayName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF475569),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                if (idx < suggestions.lastIndex) {
+                    HorizontalDivider(color = Color(0xFFE2E8F0))
+                }
+            }
         }
     }
 }
