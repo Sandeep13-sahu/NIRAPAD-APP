@@ -28,11 +28,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ import com.example.data.model.SafetyFactor
 import com.example.data.service.LocationReading
 import com.example.localization.NirapadCopy
 import com.example.ui.components.NirapadMapCanvas
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.components.ProvenanceChip
 import com.example.ui.components.SafetyTierBadge
 import com.example.ui.theme.NirapadBorderSubtle
@@ -87,7 +89,10 @@ fun PlanRouteScreen(
     onStartJourney: (Boolean, Long, Long) -> Unit,
     onOpenAiAdvisor: () -> Unit,
     onOpenAdvisoryAiNavigation: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hasLiveGpsFix: Boolean = currentLocation.timestampMillis > 0L,
+    locationPermissionGranted: Boolean = hasLiveGpsFix,
+    onRequestLocationPermission: () -> Unit = {}
 ) {
     var expandedRouteId by remember { mutableStateOf<String?>(null) }
     var sharingEnabled by remember(contacts.size) { mutableStateOf(contacts.isNotEmpty()) }
@@ -97,7 +102,7 @@ fun PlanRouteScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Plan & Compare Routes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
@@ -107,7 +112,7 @@ fun PlanRouteScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
+            NirapadOutlinedTextField(
                 value = destinationQuery,
                 onValueChange = onDestinationQueryChange,
                 placeholder = { Text(copy.searchDestinationHint) },
@@ -118,16 +123,21 @@ fun PlanRouteScreen(
             )
             Button(
                 onClick = onSearchRoutes,
-                colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NirapadPrimaryTeal,
+                    contentColor = Color.White
+                ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.height(54.dp).minimumInteractiveComponentSize().testTag("plan_search_button")
             ) {
-                Text("Go")
+                Text("Go", fontWeight = FontWeight.Bold)
             }
         }
 
         OutlinedButton(
             onClick = onOpenAdvisoryAiNavigation,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+            border = BorderStroke(1.dp, NirapadPrimaryTeal),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -148,7 +158,7 @@ fun PlanRouteScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Transparent Route Comparison", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Transparent Route Comparison", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
                         Text(
                             "Search a destination to fetch OSRM route alternatives, ETA, distance, and explainable safety factor coverage.",
                             style = MaterialTheme.typography.bodyMedium,
@@ -156,6 +166,8 @@ fun PlanRouteScreen(
                         )
                         OutlinedButton(
                             onClick = onSearchRoutes,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                            border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                             modifier = Modifier.minimumInteractiveComponentSize()
                         ) {
                             Text("Load Routes to $destinationQuery")
@@ -213,6 +225,16 @@ fun PlanRouteScreen(
                     breadcrumbs = emptyList(),
                     facilities = facilities,
                     isDeviated = false,
+                    bearingDegrees = currentLocation.bearingDegrees,
+                    hasLiveGpsFix = hasLiveGpsFix,
+                    accuracyMeters = currentLocation.accuracyMeters,
+                    locationPermissionGranted = locationPermissionGranted,
+                    autoFollowByDefault = false,
+                    fullscreenTitle = "Routes to ${data.destinationLabel}",
+                    destinationQuery = destinationQuery,
+                    onDestinationQueryChange = onDestinationQueryChange,
+                    onSearchDestination = { onSearchRoutes() },
+                    onRequestLocationPermission = onRequestLocationPermission,
                     modifier = Modifier.height(190.dp)
                 )
 
@@ -276,6 +298,19 @@ fun PlanRouteScreen(
                                         FilterChip(
                                             selected = shareDurationMinutes == mins,
                                             onClick = { shareDurationMinutes = mins },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = Color(0xFFF1F5F9),
+                                                labelColor = Color(0xFF0F172A),
+                                                selectedContainerColor = NirapadPrimaryTealContainer,
+                                                selectedLabelColor = NirapadNavyDark,
+                                                selectedLeadingIconColor = NirapadPrimaryTeal
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = shareDurationMinutes == mins,
+                                                borderColor = Color(0xFF94A3B8),
+                                                selectedBorderColor = NirapadPrimaryTeal
+                                            ),
                                             label = { Text("${mins}m expiry") }
                                         )
                                     }
@@ -287,7 +322,10 @@ fun PlanRouteScreen(
                                     val count = if (sharingEnabled) contacts.count { it.notifyOnStart }.toLong().coerceAtLeast(1L) else 0L
                                     onStartJourney(sharingEnabled, count, shareDurationMinutes)
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = NirapadPrimaryTeal,
+                                    contentColor = Color.White
+                                ),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -354,7 +392,11 @@ private fun RouteOptionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(route.freshnessNote, style = MaterialTheme.typography.labelSmall, color = NirapadTextSecondary)
-                TextButton(onClick = onToggleDetails, modifier = Modifier.minimumInteractiveComponentSize()) {
+                TextButton(
+                    onClick = onToggleDetails,
+                    colors = ButtonDefaults.textButtonColors(contentColor = NirapadPrimaryTeal),
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                ) {
                     Text(if (isExpanded) "Hide factors" else "Explain safety factors")
                     Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
                 }
@@ -373,6 +415,8 @@ private fun RouteOptionCard(
                 }
                 OutlinedButton(
                     onClick = onAskAi,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                    border = BorderStroke(1.dp, NirapadPrimaryTeal),
                     modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize()
                 ) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))

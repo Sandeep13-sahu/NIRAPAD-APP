@@ -33,18 +33,19 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -73,6 +74,7 @@ import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
 import com.example.ui.components.NirapadMapCanvas
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
 import com.example.ui.theme.NirapadCautionContainer
@@ -127,7 +129,7 @@ fun AdvisoryAiNavigationScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 96.dp)
+            .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 112.dp)
             .testTag("advisory_ai_navigation_screen"),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -241,15 +243,17 @@ fun AdvisoryAiNavigationScreen(
                         if (!locationPermissionGranted) {
                             OutlinedButton(
                                 onClick = onRequestLocationPermission,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                                border = BorderStroke(1.dp, NirapadPrimaryTeal),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                 modifier = Modifier.minimumInteractiveComponentSize()
                             ) {
-                                Text("Enable GPS", style = MaterialTheme.typography.labelSmall)
+                                Text("Enable GPS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
 
-                    OutlinedTextField(
+                    NirapadOutlinedTextField(
                         value = destinationQuery,
                         onValueChange = onDestinationQueryChange,
                         label = { Text("Destination") },
@@ -280,7 +284,22 @@ fun AdvisoryAiNavigationScreen(
                                     onDestinationQueryChange(preset.label)
                                     onCompareWithAi(preset.label, travelWindowLabel)
                                 },
-                                label = { Text(preset.label, style = MaterialTheme.typography.labelMedium) }
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = Color(0xFFF1F5F9),
+                                    labelColor = Color(0xFF0F172A)
+                                ),
+                                border = AssistChipDefaults.assistChipBorder(
+                                    enabled = true,
+                                    borderColor = Color(0xFF94A3B8)
+                                ),
+                                label = {
+                                    Text(
+                                        text = preset.label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color(0xFF0F172A),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             )
                         }
                     }
@@ -299,6 +318,18 @@ fun AdvisoryAiNavigationScreen(
                             FilterChip(
                                 selected = travelWindowLabel == label,
                                 onClick = { onTravelWindowChange(label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Color(0xFFF1F5F9),
+                                    labelColor = Color(0xFF0F172A),
+                                    selectedContainerColor = NirapadPrimaryTealContainer,
+                                    selectedLabelColor = NirapadNavyDark
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = travelWindowLabel == label,
+                                    borderColor = Color(0xFF94A3B8),
+                                    selectedBorderColor = NirapadPrimaryTeal
+                                ),
                                 label = { Text(label) },
                                 modifier = Modifier.testTag(tag)
                             )
@@ -307,7 +338,10 @@ fun AdvisoryAiNavigationScreen(
 
                     Button(
                         onClick = { onCompareWithAi(destinationQuery, travelWindowLabel) },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -331,6 +365,16 @@ fun AdvisoryAiNavigationScreen(
                 breadcrumbs = emptyList(),
                 facilities = facilities,
                 isDeviated = false,
+                bearingDegrees = currentLocation.bearingDegrees,
+                hasLiveGpsFix = hasLiveGpsFix,
+                accuracyMeters = currentLocation.accuracyMeters,
+                locationPermissionGranted = locationPermissionGranted,
+                autoFollowByDefault = false,
+                fullscreenTitle = "AI Route Preview • ${searchResult.destinationLabel}",
+                destinationQuery = destinationQuery,
+                onDestinationQueryChange = onDestinationQueryChange,
+                onSearchDestination = { query -> onCompareWithAi(query ?: destinationQuery, travelWindowLabel) },
+                onRequestLocationPermission = onRequestLocationPermission,
                 modifier = Modifier.height(185.dp)
             )
         }
@@ -552,7 +596,21 @@ fun AdvisoryAiNavigationScreen(
                                     followUpQuestion = prompt
                                     onAskFollowUp(prompt)
                                 },
-                                label = { Text(prompt, style = MaterialTheme.typography.labelMedium) }
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = Color(0xFFF1F5F9),
+                                    labelColor = Color(0xFF0F172A)
+                                ),
+                                border = AssistChipDefaults.assistChipBorder(
+                                    enabled = true,
+                                    borderColor = Color(0xFF94A3B8)
+                                ),
+                                label = {
+                                    Text(
+                                        text = prompt,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                }
                             )
                         }
                     }
@@ -562,7 +620,7 @@ fun AdvisoryAiNavigationScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedTextField(
+                        NirapadOutlinedTextField(
                             value = followUpQuestion,
                             onValueChange = { followUpQuestion = it },
                             placeholder = { Text("Ask about lighting, crowd, or checkpoints...") },
@@ -821,6 +879,8 @@ private fun AdvisoryRouteComparisonCard(
                 ) {
                     OutlinedButton(
                         onClick = onSelect,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -832,7 +892,8 @@ private fun AdvisoryRouteComparisonCard(
                     Button(
                         onClick = onStartJourney,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (item.isSaferOption) NirapadPositiveGreen else NirapadPrimaryTeal
+                            containerColor = if (item.isSaferOption) NirapadPositiveGreen else NirapadPrimaryTeal,
+                            contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
@@ -842,7 +903,7 @@ private fun AdvisoryRouteComparisonCard(
                     ) {
                         Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Use Route", maxLines = 1)
+                        Text("Use Route", color = Color.White, maxLines = 1)
                     }
                 }
             }

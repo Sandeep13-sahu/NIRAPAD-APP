@@ -47,12 +47,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -82,6 +82,7 @@ import com.example.data.repository.NirapadRepository
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.components.ProvenanceChip
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
@@ -187,7 +188,7 @@ fun VerifiedEmergencyDirectoryScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("verified_emergency_directory_screen"),
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Header Row
@@ -232,7 +233,10 @@ fun VerifiedEmergencyDirectoryScreen(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = { showAddFacilityDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("dir_add_facility_button")
@@ -298,11 +302,13 @@ fun VerifiedEmergencyDirectoryScreen(
                             if (!locationPermissionGranted) {
                                 OutlinedButton(
                                     onClick = onRequestLocationPermission,
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                                    border = BorderStroke(1.dp, NirapadPrimaryTeal),
                                     modifier = Modifier
                                         .minimumInteractiveComponentSize()
                                         .testTag("dir_enable_gps_button")
                                 ) {
-                                    Text("Enable GPS")
+                                    Text("Enable GPS", fontWeight = FontWeight.SemiBold)
                                 }
                             }
                             IconButton(
@@ -321,7 +327,7 @@ fun VerifiedEmergencyDirectoryScreen(
                     }
 
                     // Search Bar
-                    OutlinedTextField(
+                    NirapadOutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = { Text("Search police station, ambulance, center, or street") },
@@ -360,6 +366,8 @@ fun VerifiedEmergencyDirectoryScreen(
                             FilterChip(
                                 selected = selectedCategory == cat,
                                 onClick = { selectedCategory = cat },
+                                colors = dirFilterChipColors(),
+                                border = dirFilterChipBorder(selectedCategory == cat),
                                 leadingIcon = {
                                     Icon(
                                         imageVector = categoryIcon(cat),
@@ -421,6 +429,8 @@ fun VerifiedEmergencyDirectoryScreen(
                             FilterChip(
                                 selected = selectedRadiusKm == kmValue,
                                 onClick = { selectedRadiusKm = kmValue },
+                                colors = dirFilterChipColors(),
+                                border = dirFilterChipBorder(selectedRadiusKm == kmValue),
                                 label = { Text(label) },
                                 modifier = Modifier.testTag(tag)
                             )
@@ -748,21 +758,26 @@ private fun DirectoryFacilityCard(
             ) {
                 Button(
                     onClick = { onDial(facility.phone) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadNavyDark,
+                        contentColor = Color.White
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .weight(1f)
                         .minimumInteractiveComponentSize()
                         .testTag("dir_call_${facility.id}")
                 ) {
-                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Call, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Call ${facility.phone}", fontWeight = FontWeight.Bold)
+                    Text("Call ${facility.phone}", color = Color.White, fontWeight = FontWeight.Bold)
                 }
 
                 if (showDistance) {
                     OutlinedButton(
                         onClick = { onOpenMap(facility) },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
@@ -834,12 +849,14 @@ private fun AddVerifiedFacilityDialog(
                         FilterChip(
                             selected = type == code,
                             onClick = { type = code },
+                            colors = dirFilterChipColors(),
+                            border = dirFilterChipBorder(type == code),
                             label = { Text(label) }
                         )
                     }
                 }
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = name,
                     onValueChange = {
                         name = it
@@ -849,7 +866,7 @@ private fun AddVerifiedFacilityDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("dir_fac_name_input")
                 )
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = phone,
                     onValueChange = {
                         phone = it
@@ -859,14 +876,14 @@ private fun AddVerifiedFacilityDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("dir_fac_phone_input")
                 )
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
                     label = { Text("Street Address") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("dir_fac_address_input")
                 )
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = source,
                     onValueChange = {
                         source = it
@@ -899,7 +916,10 @@ private fun AddVerifiedFacilityDialog(
                                 onPublish(type, name, phone, address, source)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier.minimumInteractiveComponentSize().testTag("dir_fac_publish_button")
                     ) {
                         Text("Publish")
@@ -909,6 +929,23 @@ private fun AddVerifiedFacilityDialog(
         }
     }
 }
+
+@Composable
+private fun dirFilterChipColors() = FilterChipDefaults.filterChipColors(
+    containerColor = Color(0xFFF1F5F9),
+    labelColor = Color(0xFF0F172A),
+    selectedContainerColor = NirapadPrimaryTealContainer,
+    selectedLabelColor = NirapadNavyDark,
+    selectedLeadingIconColor = NirapadPrimaryTeal
+)
+
+@Composable
+private fun dirFilterChipBorder(selected: Boolean) = FilterChipDefaults.filterChipBorder(
+    enabled = true,
+    selected = selected,
+    borderColor = Color(0xFF94A3B8),
+    selectedBorderColor = NirapadPrimaryTeal
+)
 
 private fun categoryIcon(category: EmergencyDirectoryCategory): ImageVector = when (category) {
     EmergencyDirectoryCategory.ALL -> Icons.Default.GridView

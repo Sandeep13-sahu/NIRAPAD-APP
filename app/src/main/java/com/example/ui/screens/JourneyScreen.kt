@@ -31,7 +31,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -59,6 +58,7 @@ import com.example.data.service.LocationReading
 import com.example.localization.NirapadCopy
 import com.example.ui.components.DeliberateSosButton
 import com.example.ui.components.NirapadMapCanvas
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
 import com.example.ui.theme.NirapadCautionContainer
@@ -94,7 +94,10 @@ fun JourneyScreen(
     onEndJourney: (Journey) -> Unit,
     onLookupShareToken: (String) -> Unit,
     onGoToPlan: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hasLiveGpsFix: Boolean = currentLocation.timestampMillis > 0L,
+    locationPermissionGranted: Boolean = hasLiveGpsFix,
+    onRequestLocationPermission: () -> Unit = {}
 ) {
     val clipboard = LocalClipboardManager.current
     var tokenInput by remember(activeJourney?.shareTokenId) {
@@ -105,7 +108,7 @@ fun JourneyScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Protected Journey & Live Share", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
@@ -126,10 +129,13 @@ fun JourneyScreen(
                     )
                     Button(
                         onClick = onGoToPlan,
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier.minimumInteractiveComponentSize()
                     ) {
-                        Text("Go to Route Planner")
+                        Text("Go to Route Planner", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -137,13 +143,26 @@ fun JourneyScreen(
             val isDeviated = activeJourney.state == JourneyState.DEVIATION_DETECTED.value
             val isSos = activeJourney.state == JourneyState.SOS_TRIGGERED.value
 
+            val liveLoc = if (currentLocation.timestampMillis > 0L) {
+                LatLon(currentLocation.lat, currentLocation.lon)
+            } else {
+                LatLon(activeJourney.lastLat, activeJourney.lastLon)
+            }
             NirapadMapCanvas(
-                currentLocation = LatLon(activeJourney.lastLat, activeJourney.lastLon),
+                currentLocation = liveLoc,
                 routes = listOfNotNull(selectedRoute),
                 selectedRouteId = selectedRoute?.id,
                 breadcrumbs = breadcrumbs,
                 facilities = facilities,
                 isDeviated = isDeviated || isSos,
+                bearingDegrees = currentLocation.bearingDegrees,
+                hasLiveGpsFix = hasLiveGpsFix,
+                accuracyMeters = currentLocation.accuracyMeters,
+                locationPermissionGranted = locationPermissionGranted,
+                autoFollowByDefault = true,
+                fullscreenTitle = "Protected Journey • ${activeJourney.destinationLabel}",
+                fullscreenSubtitle = "${activeJourney.state} • Corridor offset ${deviationDistanceM}m",
+                onRequestLocationPermission = onRequestLocationPermission,
                 modifier = Modifier.height(210.dp)
             )
 
@@ -230,6 +249,8 @@ fun JourneyScreen(
                                     )
                                     OutlinedButton(
                                         onClick = { clipboard.setText(AnnotatedString(activeJourney.shareTokenId)) },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                        border = BorderStroke(1.dp, NirapadPrimaryTeal),
                                         modifier = Modifier.minimumInteractiveComponentSize()
                                     ) {
                                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -244,6 +265,8 @@ fun JourneyScreen(
                                 )
                                 OutlinedButton(
                                     onClick = { onRevokeShare(activeJourney) },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                    border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                                     modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("revoke_share_button")
                                 ) {
                                     Icon(Icons.Default.LinkOff, contentDescription = null, tint = NirapadCautionAmber)
@@ -273,12 +296,16 @@ fun JourneyScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                     OutlinedButton(
                                         onClick = { onConfirmDeviationOk(activeJourney) },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                                     ) {
                                         Text(copy.deviationConfirmOk, style = MaterialTheme.typography.labelMedium)
                                     }
                                     OutlinedButton(
                                         onClick = { onReroute(activeJourney) },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                                     ) {
                                         Text(copy.deviationReroute, style = MaterialTheme.typography.labelMedium)
@@ -292,6 +319,8 @@ fun JourneyScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(
                             onClick = { onSimulateStep(activeJourney, false) },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                            border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                             modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                         ) {
                             Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -300,6 +329,8 @@ fun JourneyScreen(
                         }
                         OutlinedButton(
                             onClick = { onSimulateStep(activeJourney, true) },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                            border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                             modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("test_deviation_button")
                         ) {
                             Icon(Icons.AutoMirrored.Filled.AltRoute, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -318,6 +349,8 @@ fun JourneyScreen(
                     ) {
                         OutlinedButton(
                             onClick = { onEndJourney(activeJourney) },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                            border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                             modifier = Modifier.weight(1f).height(52.dp).minimumInteractiveComponentSize().testTag("end_journey_button")
                         ) {
                             Icon(Icons.Default.StopCircle, contentDescription = null)
@@ -351,7 +384,7 @@ fun JourneyScreen(
                     color = NirapadTextSecondary
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    NirapadOutlinedTextField(
                         value = tokenInput,
                         onValueChange = { tokenInput = it },
                         placeholder = { Text("Paste share token (tok_...)") },
@@ -360,10 +393,14 @@ fun JourneyScreen(
                     )
                     Button(
                         onClick = { onLookupShareToken(tokenInput) },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadNavyDark,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.height(54.dp).minimumInteractiveComponentSize().testTag("open_share_token_button")
                     ) {
-                        Text("Open")
+                        Text("View", color = Color.White, fontWeight = FontWeight.SemiBold)
                     }
                 }
 

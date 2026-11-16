@@ -139,7 +139,6 @@ class AdvisoryAiNavigationUiTest {
             )
         )
 
-        composeRule.mainClock.autoAdvance = false
         composeRule.setContent {
             NirapadTheme {
                 AdvisoryAiNavigationScreen(
@@ -169,15 +168,15 @@ class AdvisoryAiNavigationUiTest {
                 )
             }
         }
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.waitForIdle()
 
         composeRule.onNodeWithContentDescription("Clear destination").performClick()
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("advisory_destination_input").performScrollTo().performTextInput("AIIMS Main Gate")
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.waitForIdle()
 
         composeRule.onNodeWithTag("advisory_compare_button").performScrollTo().performClick()
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.waitForIdle()
 
         assertEquals("AIIMS Main Gate", capturedDestination)
         assertEquals("Evening / Dusk", capturedWindow)
@@ -190,7 +189,7 @@ class AdvisoryAiNavigationUiTest {
         composeRule.onNodeWithText("Active Metro Flow (84)").assertIsDisplayed()
 
         composeRule.onNodeWithTag("advisory_start_route_1").performScrollTo().performClick()
-        composeRule.mainClock.advanceTimeBy(150)
+        composeRule.waitForIdle()
         assertEquals("route_1", startedRouteId)
     }
 
@@ -237,6 +236,7 @@ class AdvisoryAiNavigationUiTest {
 
         // Transition to error state and verify real error message & retry CTA
         comparisonState = UiState.Error("Gemini AI quota temporarily reached.")
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         composeRule.mainClock.advanceTimeBy(150)
 
         composeRule.onNodeWithTag("advisory_error_banner").performScrollTo().assertIsDisplayed()

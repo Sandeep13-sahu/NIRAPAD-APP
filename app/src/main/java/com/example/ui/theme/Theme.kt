@@ -33,7 +33,7 @@ private val NirapadLightColorScheme = lightColorScheme(
     onSurface = NirapadNavyDark,
     surfaceVariant = NirapadSurfaceVariant,
     onSurfaceVariant = NirapadTextSecondary,
-    outline = NirapadBorderSubtle,
+    outline = Color(0xFF7B93AA),
     outlineVariant = NirapadBorderSubtle
 )
 
@@ -58,7 +58,8 @@ private val NirapadDarkColorScheme = darkColorScheme(
     onSurface = Color(0xFFF0F4F8),
     surfaceVariant = NirapadDarkSurfaceVariant,
     onSurfaceVariant = Color(0xFFBCCCDC),
-    outline = Color(0xFF2B4661)
+    outline = Color(0xFF607E9C),
+    outlineVariant = Color(0xFF2B4661)
 )
 
 val NirapadShapes = Shapes(

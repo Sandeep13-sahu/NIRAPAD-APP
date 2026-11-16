@@ -45,11 +45,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -63,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +74,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.firestore.UiState
 import com.example.data.model.EmergencyContact
 import com.example.localization.NirapadCopy
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadEmergencyContainer
 import com.example.ui.theme.NirapadEmergencyRed
@@ -130,7 +132,7 @@ fun TrustedContactsScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("trusted_contacts_screen"),
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -173,7 +175,10 @@ fun TrustedContactsScreen(
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = { showCreateDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPrimaryTeal,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
                         .testTag("trusted_contacts_add_button")
@@ -243,7 +248,7 @@ fun TrustedContactsScreen(
                         }
                     }
 
-                    OutlinedTextField(
+                    NirapadOutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = { Text("Search name, phone, email, or relation") },
@@ -268,16 +273,22 @@ fun TrustedContactsScreen(
                         FilterChip(
                             selected = activeFilter == ContactFilter.ALL,
                             onClick = { activeFilter = ContactFilter.ALL },
+                            colors = contactFilterChipColors(),
+                            border = contactFilterChipBorder(activeFilter == ContactFilter.ALL),
                             label = { Text("All (${contacts.size})") }
                         )
                         FilterChip(
                             selected = activeFilter == ContactFilter.SOS_READY,
                             onClick = { activeFilter = ContactFilter.SOS_READY },
+                            colors = contactFilterChipColors(),
+                            border = contactFilterChipBorder(activeFilter == ContactFilter.SOS_READY),
                             label = { Text("SOS Alerts (${contacts.count { it.notifyOnSos }})") }
                         )
                         FilterChip(
                             selected = activeFilter == ContactFilter.VERIFIED,
                             onClick = { activeFilter = ContactFilter.VERIFIED },
+                            colors = contactFilterChipColors(),
+                            border = contactFilterChipBorder(activeFilter == ContactFilter.VERIFIED),
                             label = { Text("Verified (${contacts.count { it.verified }})") }
                         )
                     }
@@ -375,7 +386,10 @@ fun TrustedContactsScreen(
                                 )
                                 Button(
                                     onClick = { showCreateDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = NirapadPrimaryTeal,
+                                        contentColor = Color.White
+                                    ),
                                     modifier = Modifier
                                         .minimumInteractiveComponentSize()
                                         .testTag("trusted_contacts_empty_add_button")
@@ -512,7 +526,10 @@ fun TrustedContactsScreen(
                         onDeleteContact(target.id)
                         contactPendingDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadEmergencyRed),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadEmergencyRed,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
                         .testTag("confirm_delete_contact_button")
@@ -698,6 +715,8 @@ private fun TrustedContactCard(
                 FilterChip(
                     selected = contact.notifyOnStart,
                     onClick = { onToggleNotifyStart(!contact.notifyOnStart) },
+                    colors = contactFilterChipColors(),
+                    border = contactFilterChipBorder(contact.notifyOnStart),
                     leadingIcon = {
                         Icon(
                             Icons.Default.NotificationsActive,
@@ -711,6 +730,8 @@ private fun TrustedContactCard(
                 FilterChip(
                     selected = contact.notifyOnSos,
                     onClick = { onToggleNotifySos(!contact.notifyOnSos) },
+                    colors = contactFilterChipColors(),
+                    border = contactFilterChipBorder(contact.notifyOnSos),
                     leadingIcon = {
                         Icon(
                             Icons.Default.Shield,
@@ -774,7 +795,7 @@ fun TrustedContactEditorDialog(
                     color = NirapadNavyDark
                 )
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = name,
                     onValueChange = {
                         name = it
@@ -787,7 +808,7 @@ fun TrustedContactEditorDialog(
                         .testTag("contact_name_input")
                 )
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = phoneNumber,
                     onValueChange = {
                         phoneNumber = it
@@ -803,7 +824,7 @@ fun TrustedContactEditorDialog(
                         .testTag("contact_phone_input")
                 )
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = email,
                     onValueChange = {
                         email = it
@@ -819,7 +840,7 @@ fun TrustedContactEditorDialog(
                         .testTag("contact_email_input")
                 )
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = relationship,
                     onValueChange = { relationship = it },
                     label = { Text("Relationship") },
@@ -839,6 +860,8 @@ fun TrustedContactEditorDialog(
                         FilterChip(
                             selected = relationship.equals(preset, ignoreCase = true),
                             onClick = { relationship = preset },
+                            colors = contactFilterChipColors(),
+                            border = contactFilterChipBorder(relationship.equals(preset, ignoreCase = true)),
                             label = { Text(preset) }
                         )
                     }
@@ -934,7 +957,10 @@ fun TrustedContactEditorDialog(
                                 )
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("save_contact_button")
@@ -946,3 +972,20 @@ fun TrustedContactEditorDialog(
         }
     }
 }
+
+@Composable
+private fun contactFilterChipColors() = FilterChipDefaults.filterChipColors(
+    containerColor = Color(0xFFF1F5F9),
+    labelColor = Color(0xFF0F172A),
+    selectedContainerColor = NirapadPrimaryTealContainer,
+    selectedLabelColor = NirapadNavyDark,
+    selectedLeadingIconColor = NirapadPrimaryTeal
+)
+
+@Composable
+private fun contactFilterChipBorder(selected: Boolean) = FilterChipDefaults.filterChipBorder(
+    enabled = true,
+    selected = selected,
+    borderColor = Color(0xFF94A3B8),
+    selectedBorderColor = NirapadPrimaryTeal
+)

@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -66,7 +67,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -100,24 +100,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.ceil
-import com.example.data.cache.MapTileCache
-import com.example.data.cache.MapTileCacheStats
-import com.example.data.cache.SlippyMapMath
-import com.example.data.cache.TileOrigin
 import com.example.data.model.DataProvenance
-import com.example.data.model.EmergencyFacility
-import com.example.data.model.LatLon
-import com.example.data.model.RouteOption
 import com.example.data.model.SafetyTier
 import com.example.data.repository.AiAdvisorUiState
 import com.example.localization.NirapadCopy
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
 import com.example.ui.theme.NirapadCautionContainer
@@ -130,297 +118,8 @@ import com.example.ui.theme.NirapadPrimaryTeal
 import com.example.ui.theme.NirapadPrimaryTealContainer
 import com.example.ui.theme.NirapadSurface
 import com.example.ui.theme.NirapadTextSecondary
-import kotlin.math.max
+import kotlin.math.ceil
 
-@Composable
-fun NirapadMapCanvas(
-    currentLocation: LatLon,
-    routes: List<RouteOption>,
-    selectedRouteId: String?,
-    breadcrumbs: List<LatLon>,
-    facilities: List<EmergencyFacility>,
-    isDeviated: Boolean,
-    modifier: Modifier = Modifier,
-    tileCacheOverride: MapTileCache? = null
-) {
-    val context = LocalContext.current
-    val isInspection = LocalInspectionMode.current
-    val tileCache = tileCacheOverride ?: remember(context, isInspection) {
-        if (isInspection) null else runCatching { MapTileCache.getInstance(context) }.getOrNull()
-    }
-    val cacheStats by (tileCache?.statsFlow?.collectAsState(initial = MapTileCacheStats())
-        ?: remember { mutableStateOf(MapTileCacheStats()) })
-
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFFEAF2F8))
-            .border(1.dp, NirapadBorderSubtle, RoundedCornerShape(16.dp))
-            .semantics { contentDescription = "Interactive route and safety context map" }
-    ) {
-        val density = LocalDensity.current
-        val widthPx = with(density) { maxWidth.toPx().coerceAtLeast(1f) }
-        val heightPx = with(density) { maxHeight.toPx().coerceAtLeast(1f) }
-
-        val allPoints = remember(currentLocation, routes, breadcrumbs, facilities) {
-            buildList {
-                add(currentLocation)
-                routes.forEach { addAll(it.geometry) }
-                addAll(breadcrumbs)
-                facilities.take(5).forEach { add(LatLon(it.lat, it.lon)) }
-            }
-        }
-
-        val projection = remember(allPoints, currentLocation, widthPx, heightPx) {
-            SlippyMapMath.buildProjection(
-                points = allPoints,
-                fallbackCenter = currentLocation,
-                widthPx = widthPx,
-                heightPx = heightPx
-            )
-        }
-        val visibleTiles = remember(projection) { projection.visibleTiles() }
-        val visibleTilesKey = remember(visibleTiles) { visibleTiles.joinToString("|") { it.coord.key } }
-
-        var decodedTiles by remember { mutableStateOf<Map<String, Pair<ImageBitmap, TileOrigin>>>(emptyMap()) }
-
-        LaunchedEffect(tileCache, visibleTilesKey, cacheStats.lastCachedAtMs) {
-            if (tileCache == null || visibleTiles.isEmpty()) {
-                decodedTiles = emptyMap()
-                return@LaunchedEffect
-            }
-            val loaded = withContext(Dispatchers.IO) {
-                val map = LinkedHashMap<String, Pair<ImageBitmap, TileOrigin>>(visibleTiles.size)
-                visibleTiles.forEach { placement ->
-                    val (bmp, origin) = tileCache.getTileBitmap(placement.coord)
-                    if (bmp != null) {
-                        map[placement.coord.key] = bmp.asImageBitmap() to origin
-                    }
-                }
-                map
-            }
-            decodedTiles = loaded
-        }
-
-        val isOnline = remember(tileCache, visibleTilesKey, cacheStats.lastCachedAtMs) {
-            tileCache?.isCurrentlyOnline() == true
-        }
-        val renderedTileCount = decodedTiles.size
-
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-
-            // Subtle offline vector grid fallback underneath raster tiles
-            val gridStep = 48f
-            var x = 0f
-            while (x < w) {
-                drawLine(Color(0xFFDDE7F0), Offset(x, 0f), Offset(x, h), strokeWidth = 1.5f)
-                x += gridStep
-            }
-            var y = 0f
-            while (y < h) {
-                drawLine(Color(0xFFDDE7F0), Offset(0f, y), Offset(w, y), strokeWidth = 1.5f)
-                y += gridStep
-            }
-
-            // Draw DataStore-cached or live OSM raster tiles aligned with Web Mercator projection
-            visibleTiles.forEach { tile ->
-                val imageEntry = decodedTiles[tile.coord.key]
-                if (imageEntry != null) {
-                    val drawSize = ceil(tile.sizePx).toInt().coerceAtLeast(1) + 1
-                    drawImage(
-                        image = imageEntry.first,
-                        dstOffset = IntOffset(tile.leftPx.toInt(), tile.topPx.toInt()),
-                        dstSize = IntSize(drawSize, drawSize)
-                    )
-                }
-            }
-
-            fun project(pt: LatLon): Offset {
-                val (px, py) = projection.project(pt)
-                return Offset(px, py)
-            }
-
-            // Draw alternative routes first, selected route on top
-            val ordered = routes.sortedBy { it.id == selectedRouteId }
-            ordered.forEach { route ->
-                if (route.geometry.size >= 2) {
-                    val isSelected = route.id == selectedRouteId
-                    val path = Path().apply {
-                        val first = project(route.geometry.first())
-                        moveTo(first.x, first.y)
-                        route.geometry.drop(1).forEach { pt ->
-                            val o = project(pt)
-                            lineTo(o.x, o.y)
-                        }
-                    }
-                    val color = when {
-                        !isSelected -> Color(0xFF627D98)
-                        route.safetyTier == SafetyTier.LIMITED_DATA -> NirapadCautionAmber
-                        else -> NirapadPrimaryTeal
-                    }
-                    if (isSelected) {
-                        // Crisp halo so route line remains readable on top of OSM map tiles
-                        drawPath(
-                            path = path,
-                            color = Color.White.copy(alpha = 0.85f),
-                            style = Stroke(width = 15f, cap = StrokeCap.Round)
-                        )
-                    }
-                    drawPath(
-                        path = path,
-                        color = color,
-                        style = Stroke(
-                            width = if (isSelected) 10f else 5f,
-                            cap = StrokeCap.Round,
-                            pathEffect = if (isSelected) null else PathEffect.dashPathEffect(floatArrayOf(16f, 12f))
-                        )
-                    )
-                }
-            }
-
-            // Draw active GPS breadcrumb trail
-            if (breadcrumbs.size >= 2) {
-                val crumbPath = Path().apply {
-                    val first = project(breadcrumbs.first())
-                    moveTo(first.x, first.y)
-                    breadcrumbs.drop(1).forEach { pt ->
-                        val o = project(pt)
-                        lineTo(o.x, o.y)
-                    }
-                }
-                drawPath(
-                    path = crumbPath,
-                    color = NirapadNavyDark,
-                    style = Stroke(width = 6f, cap = StrokeCap.Round)
-                )
-            }
-
-            // Draw verified facilities pins
-            facilities.take(5).forEach { fac ->
-                val o = project(LatLon(fac.lat, fac.lon))
-                drawCircle(Color.White, radius = 11f, center = o)
-                drawCircle(NirapadPositiveGreen, radius = 7f, center = o)
-            }
-
-            // Draw destination pin if route exists
-            routes.firstOrNull { it.id == selectedRouteId }?.geometry?.lastOrNull()?.let { dest ->
-                val d = project(dest)
-                drawCircle(Color.White, radius = 15f, center = d)
-                drawCircle(NirapadNavyDark, radius = 10f, center = d)
-            }
-
-            // Draw user's current position beacon
-            val me = project(currentLocation)
-            drawCircle(
-                color = (if (isDeviated) NirapadEmergencyRed else NirapadPrimaryTeal).copy(alpha = 0.25f),
-                radius = 28f,
-                center = me
-            )
-            drawCircle(Color.White, radius = 14f, center = me)
-            drawCircle(if (isDeviated) NirapadEmergencyRed else NirapadPrimaryTeal, radius = 9f, center = me)
-        }
-
-        // Top-right DataStore tile cache & connectivity indicator
-        val statusBg: Color
-        val statusFg: Color
-        val statusLabel: String
-        val statusIcon = if (!isOnline) Icons.Default.CloudOff else Icons.Default.Map
-        when {
-            !isOnline && renderedTileCount > 0 -> {
-                statusBg = NirapadCautionContainer.copy(alpha = 0.94f)
-                statusFg = NirapadNavyDark
-                statusLabel = "Offline Cache • ${cacheStats.cachedTileCount} tiles"
-            }
-            isOnline && renderedTileCount > 0 -> {
-                statusBg = NirapadSurface.copy(alpha = 0.92f)
-                statusFg = NirapadPrimaryTeal
-                statusLabel = "DataStore • ${cacheStats.cachedTileCount} cached"
-            }
-            cacheStats.cachedTileCount > 0 -> {
-                statusBg = NirapadSurface.copy(alpha = 0.92f)
-                statusFg = NirapadNavyDark
-                statusLabel = "Offline Grid • ${cacheStats.cachedTileCount} cached"
-            }
-            else -> {
-                statusBg = NirapadSurface.copy(alpha = 0.92f)
-                statusFg = NirapadTextSecondary
-                statusLabel = if (isOnline) "Live Map" else "Offline Grid"
-            }
-        }
-        Surface(
-            color = statusBg,
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, NirapadBorderSubtle),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(10.dp)
-                .semantics(mergeDescendants = true) {}
-                .testTag("map_cache_status_badge")
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(statusIcon, contentDescription = null, tint = statusFg, modifier = Modifier.size(13.dp))
-                Text(
-                    text = statusLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = statusFg
-                )
-            }
-        }
-
-        // Non-color-only Legend overlay
-        Surface(
-            color = NirapadSurface.copy(alpha = 0.92f),
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, NirapadBorderSubtle),
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                LegendDot(color = NirapadPrimaryTeal, label = "Selected")
-                LegendDot(color = Color(0xFF627D98), label = "Alt (dashed)")
-                LegendDot(color = NirapadPositiveGreen, label = "Verified Help")
-            }
-        }
-
-        if (renderedTileCount > 0) {
-            Surface(
-                color = NirapadSurface.copy(alpha = 0.85f),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(10.dp)
-            ) {
-                Text(
-                    text = "© OSM",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NirapadTextSecondary,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LegendDot(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
-        Text(text = label, style = MaterialTheme.typography.labelSmall, color = NirapadNavyDark)
-    }
-}
 
 @Composable
 fun ProvenanceChip(provenance: DataProvenance, modifier: Modifier = Modifier) {
@@ -1137,15 +836,20 @@ fun SosConfirmationDialog(
         confirmButton = {
             Button(
                 onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = NirapadEmergencyRed),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NirapadEmergencyRed,
+                    contentColor = Color.White
+                ),
                 modifier = Modifier.minimumInteractiveComponentSize().testTag("confirm_sos_button")
             ) {
-                Text(copy.sosTriggerNow, fontWeight = FontWeight.Bold)
+                Text(copy.sosTriggerNow, color = Color.White, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             OutlinedButton(
                 onClick = onDismiss,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                 modifier = Modifier.minimumInteractiveComponentSize().testTag("cancel_sos_button")
             ) {
                 Text(copy.cancelLabel)
@@ -1214,7 +918,21 @@ fun AiAdvisorModal(
                             question = prompt
                             onAsk(prompt)
                         },
-                        label = { Text(prompt, style = MaterialTheme.typography.labelMedium) }
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = Color(0xFFF1F5F9),
+                            labelColor = Color(0xFF0F172A)
+                        ),
+                        border = AssistChipDefaults.assistChipBorder(
+                            enabled = true,
+                            borderColor = Color(0xFF94A3B8)
+                        ),
+                        label = {
+                            Text(
+                                text = prompt,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
                     )
                 }
             }
@@ -1224,7 +942,7 @@ fun AiAdvisorModal(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = question,
                     onValueChange = { question = it },
                     placeholder = { Text("Ask about route context or journey tips...") },

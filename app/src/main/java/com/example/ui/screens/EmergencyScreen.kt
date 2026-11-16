@@ -27,10 +27,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -56,6 +56,7 @@ import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
 import com.example.ui.components.DeliberateSosButton
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.components.ProvenanceChip
 import com.example.ui.components.SosSignalBeacon
 import com.example.ui.theme.NirapadBorderSubtle
@@ -104,7 +105,7 @@ fun EmergencyScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Deliberate SOS Panel
@@ -204,9 +205,11 @@ fun EmergencyScreen(
                                     if (!locationPermissionGranted) {
                                         OutlinedButton(
                                             onClick = onRequestLocationPermission,
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                                            border = BorderStroke(1.dp, NirapadPrimaryTeal),
                                             modifier = Modifier.minimumInteractiveComponentSize()
                                         ) {
-                                            Text("Enable GPS")
+                                            Text("Enable GPS", fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }
@@ -216,6 +219,8 @@ fun EmergencyScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                     OutlinedButton(
                                         onClick = { clipboard.setText(AnnotatedString(sos.shareTokenId)) },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("copy_sos_token_button")
                                     ) {
                                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -239,12 +244,15 @@ fun EmergencyScreen(
                                             }
                                             context.startActivity(Intent.createChooser(sendIntent, "Share Live SOS Location"))
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = NirapadPrimaryTeal,
+                                            contentColor = Color.White
+                                        ),
                                         modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("share_sos_link_button")
                                     ) {
                                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Share Live")
+                                        Text("Share Live", color = Color.White, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -252,16 +260,21 @@ fun EmergencyScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(
                                     onClick = { onUpdateSosStatus(sos, "CANCELLED") },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                                    border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                                     modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("cancel_active_sos_button")
                                 ) {
                                     Text("Cancel False Trigger")
                                 }
                                 Button(
                                     onClick = { onUpdateSosStatus(sos, "RESOLVED") },
-                                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPositiveGreen),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = NirapadPositiveGreen,
+                                        contentColor = Color.White
+                                    ),
                                     modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("resolve_active_sos_button")
                                 ) {
-                                    Text("I'm Safe (Resolve)")
+                                    Text("I'm Safe (Resolve)", color = Color.White, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -282,11 +295,13 @@ fun EmergencyScreen(
             }
             OutlinedButton(
                 onClick = onOpenDirectory,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                border = BorderStroke(1.dp, NirapadPrimaryTeal),
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .testTag("open_verified_directory_button")
             ) {
-                Text(copy.openDirectoryCta)
+                Text(copy.openDirectoryCta, fontWeight = FontWeight.SemiBold)
             }
         }
         allFacilities.forEach { facility ->
@@ -326,13 +341,16 @@ fun EmergencyScreen(
                             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${facility.phone}"))
                             context.startActivity(intent)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadNavyDark,
+                            contentColor = Color.White
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.minimumInteractiveComponentSize().testTag("call_${facility.phone}")
                     ) {
-                        Icon(Icons.Default.Call, contentDescription = "Call ${facility.name}", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Call, contentDescription = "Call ${facility.name}", tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(facility.phone, fontWeight = FontWeight.Bold)
+                        Text("Call ${facility.phone}", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -348,7 +366,7 @@ fun EmergencyScreen(
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.Report, contentDescription = null, tint = NirapadPrimaryTeal)
-                    Text("Submit Safety Observation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Submit Safety Observation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
                 }
                 Text(
                     "Submitted reports enter moderation as User-Reported (Pending Review) and are never treated as verified facts until reviewed.",
@@ -360,25 +378,37 @@ fun EmergencyScreen(
                         FilterChip(
                             selected = reportCategory == code,
                             onClick = { reportCategory = code },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color(0xFFF1F5F9),
+                                labelColor = Color(0xFF0F172A),
+                                selectedContainerColor = Color(0xFFD9EFF2),
+                                selectedLabelColor = NirapadNavyDark
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = reportCategory == code,
+                                borderColor = Color(0xFF94A3B8),
+                                selectedBorderColor = NirapadPrimaryTeal
+                            ),
                             label = { Text(label) }
                         )
                     }
                 }
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = reportTitle,
                     onValueChange = { reportTitle = it },
                     label = { Text("Short title") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("report_title_input")
                 )
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = reportLocation,
                     onValueChange = { reportLocation = it },
                     label = { Text("Landmark / street") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = reportDescription,
                     onValueChange = { reportDescription = it },
                     label = { Text("Observation details") },
@@ -392,10 +422,13 @@ fun EmergencyScreen(
                         reportDescription = ""
                         reportLocation = ""
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPrimaryTeal,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("submit_report_button")
                 ) {
-                    Text("Submit for Moderation")
+                    Text("Submit for Moderation", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
 
                 if (myReports.isNotEmpty()) {

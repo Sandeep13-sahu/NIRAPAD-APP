@@ -45,12 +45,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,6 +76,7 @@ import com.example.data.model.AuditLog
 import com.example.data.model.SafetyReport
 import com.example.data.model.SafetyReportStatus
 import com.example.localization.NirapadCopy
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCanvas
 import com.example.ui.theme.NirapadCautionAmber
@@ -339,7 +340,7 @@ fun AdminModerationWorkspaceScreen(
             }
 
             // Search Input
-            OutlinedTextField(
+            NirapadOutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = { Text("Search by title, street/location, category, or note") },
@@ -372,6 +373,18 @@ fun AdminModerationWorkspaceScreen(
                     FilterChip(
                         selected = activeFilter == filter,
                         onClick = { activeFilter = filter },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color(0xFFF1F5F9),
+                            labelColor = Color(0xFF0F172A),
+                            selectedContainerColor = NirapadPrimaryTealContainer,
+                            selectedLabelColor = NirapadNavyDark
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = activeFilter == filter,
+                            borderColor = Color(0xFF94A3B8),
+                            selectedBorderColor = NirapadPrimaryTeal
+                        ),
                         label = { Text("${filter.label} ($count)") },
                         modifier = Modifier.testTag(filter.testTag)
                     )
@@ -438,7 +451,10 @@ fun AdminModerationWorkspaceScreen(
                             )
                             Button(
                                 onClick = onRefreshReports,
-                                colors = ButtonDefaults.buttonColors(containerColor = NirapadEmergencyRed),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = NirapadEmergencyRed,
+                                    contentColor = Color.White
+                                ),
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
                                     .testTag("admin_moderation_retry_button")
@@ -586,7 +602,7 @@ fun AdminModerationWorkspaceScreen(
             }
         }
 
-        Spacer(Modifier.height(72.dp))
+        Spacer(Modifier.height(104.dp))
     }
 
     // View Full Safety Report Details & Moderation Dialog
@@ -785,6 +801,8 @@ private fun SafetyReportModerationCard(
             ) {
                 OutlinedButton(
                     onClick = onView,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                    border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                     modifier = Modifier
                         .weight(1f)
                         .minimumInteractiveComponentSize()
@@ -809,7 +827,10 @@ private fun SafetyReportModerationCard(
                 }
                 Button(
                     onClick = onResolve,
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPositiveGreen),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPositiveGreen,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .minimumInteractiveComponentSize()
@@ -817,7 +838,7 @@ private fun SafetyReportModerationCard(
                 ) {
                     Icon(Icons.Default.TaskAlt, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Resolve", maxLines = 1)
+                    Text("Resolve", color = Color.White, maxLines = 1)
                 }
             }
         }
@@ -949,7 +970,7 @@ private fun SafetyReportDetailDialog(
 
                 HorizontalDivider(color = NirapadBorderSubtle)
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = moderationNote,
                     onValueChange = { if (it.length <= 300) moderationNote = it },
                     label = { Text("Moderation Note (Reason / Resolution Summary)") },
@@ -990,7 +1011,10 @@ private fun SafetyReportDetailDialog(
                                 moderationNote.ifBlank { "Resolved by Operations Admin" }
                             )
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPositiveGreen),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPositiveGreen,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -1013,7 +1037,10 @@ private fun SafetyReportDetailDialog(
                                 moderationNote.ifBlank { "Verified by Operations Admin" }
                             )
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -1030,6 +1057,8 @@ private fun SafetyReportDetailDialog(
                                 moderationNote.ifBlank { "Dismissed after review" }
                             )
                         },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -1128,12 +1157,24 @@ private fun ModerationActionDialog(
                         FilterChip(
                             selected = note == preset,
                             onClick = { note = preset },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color(0xFFF1F5F9),
+                                labelColor = Color(0xFF0F172A),
+                                selectedContainerColor = NirapadPrimaryTealContainer,
+                                selectedLabelColor = NirapadNavyDark
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = note == preset,
+                                borderColor = Color(0xFF94A3B8),
+                                selectedBorderColor = NirapadPrimaryTeal
+                            ),
                             label = { Text(preset, maxLines = 1) }
                         )
                     }
                 }
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = note,
                     onValueChange = { if (it.length <= 300) note = it },
                     label = { Text(if (isFlag) "Flag Reason / Escalation Note" else "Resolution Summary") },
@@ -1160,7 +1201,8 @@ private fun ModerationActionDialog(
                     Button(
                         onClick = { onConfirm(note.ifBlank { presets.first() }) },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isFlag) NirapadEmergencyRed else NirapadPositiveGreen
+                            containerColor = if (isFlag) NirapadEmergencyRed else NirapadPositiveGreen,
+                            contentColor = Color.White
                         ),
                         modifier = Modifier
                             .weight(1f)

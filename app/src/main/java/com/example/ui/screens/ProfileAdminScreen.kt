@@ -29,12 +29,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ import com.example.data.model.SafetyReport
 import com.example.data.model.UserProfile
 import com.example.localization.AppLang
 import com.example.localization.NirapadCopy
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionContainer
 import com.example.ui.theme.NirapadEmergencyRed
@@ -105,7 +107,7 @@ fun ProfileAdminScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Profile Header
@@ -130,6 +132,8 @@ fun ProfileAdminScreen(
                     }
                     OutlinedButton(
                         onClick = onSignOut,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         modifier = Modifier.minimumInteractiveComponentSize().testTag("sign_out_button")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -153,10 +157,12 @@ fun ProfileAdminScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Trusted Contacts (${contacts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Trusted Contacts (${contacts.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = onOpenTrustedContacts,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                            border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                             modifier = Modifier.minimumInteractiveComponentSize().testTag("manage_trusted_contacts_button")
                         ) {
                             Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -165,12 +171,15 @@ fun ProfileAdminScreen(
                         }
                         Button(
                             onClick = { showAddContact = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NirapadPrimaryTeal,
+                                contentColor = Color.White
+                            ),
                             modifier = Modifier.minimumInteractiveComponentSize().testTag("add_contact_button")
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Add")
+                            Text("Add", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -243,7 +252,7 @@ fun ProfileAdminScreen(
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Safety & Privacy Preferences", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = displayName,
                     onValueChange = { displayName = it },
                     label = { Text("Display Name") },
@@ -257,13 +266,15 @@ fun ProfileAdminScreen(
                         FilterChip(
                             selected = language == lang,
                             onClick = { onUpdateSettings(lang, thresholdMeters, retentionDays, displayName) },
+                            colors = profileFilterChipColors(),
+                            border = profileFilterChipBorder(language == lang),
                             label = { Text(lang.label) },
                             modifier = Modifier.testTag("lang_${lang.code}")
                         )
                     }
                 }
 
-                Text("Deviation Alert Threshold", style = MaterialTheme.typography.labelLarge)
+                Text("Deviation Alert Threshold", style = MaterialTheme.typography.labelLarge, color = NirapadNavyDark)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(150L, 250L, 500L).forEach { m ->
                         FilterChip(
@@ -272,12 +283,14 @@ fun ProfileAdminScreen(
                                 thresholdMeters = m
                                 onUpdateSettings(language, m, retentionDays, displayName)
                             },
+                            colors = profileFilterChipColors(),
+                            border = profileFilterChipBorder(thresholdMeters == m),
                             label = { Text("${m}m") }
                         )
                     }
                 }
 
-                Text("Location Retention Window", style = MaterialTheme.typography.labelLarge)
+                Text("Location Retention Window", style = MaterialTheme.typography.labelLarge, color = NirapadNavyDark)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(7L, 30L, 90L).forEach { d ->
                         FilterChip(
@@ -286,6 +299,8 @@ fun ProfileAdminScreen(
                                 retentionDays = d
                                 onUpdateSettings(language, thresholdMeters, d, displayName)
                             },
+                            colors = profileFilterChipColors(),
+                            border = profileFilterChipBorder(retentionDays == d),
                             label = { Text("${d} days") }
                         )
                     }
@@ -293,14 +308,19 @@ fun ProfileAdminScreen(
 
                 Button(
                     onClick = { onUpdateSettings(language, thresholdMeters, retentionDays, displayName) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPrimaryTeal,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize()
                 ) {
-                    Text("Save Preferences")
+                    Text("Save Preferences", fontWeight = FontWeight.SemiBold)
                 }
 
                 OutlinedButton(
                     onClick = onPurgeHistory,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                    border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                     modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("purge_history_button")
                 ) {
                     Text("Purge Completed Location Breadcrumbs")
@@ -363,17 +383,22 @@ fun ProfileAdminScreen(
                 ) {
                     Button(
                         onClick = onPrefetchOfflineMap,
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
                             .testTag("cache_map_area_button")
                     ) {
-                        Text("Cache Area")
+                        Text("Cache Area", fontWeight = FontWeight.SemiBold)
                     }
                     OutlinedButton(
                         onClick = onClearMapTileCache,
                         enabled = tileCacheStats.cachedTileCount > 0,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -400,7 +425,7 @@ fun ProfileAdminScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = NirapadNavyDark)
-                        Text(copy.adminWorkspaceTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(copy.adminWorkspaceTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
                     }
                     if (isAdmin) {
                         TextButton(onClick = { showAdminWorkspace = !showAdminWorkspace }) {
@@ -416,6 +441,8 @@ fun ProfileAdminScreen(
                     )
                     OutlinedButton(
                         onClick = onOpenModerationWorkspace,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .minimumInteractiveComponentSize()
@@ -432,13 +459,16 @@ fun ProfileAdminScreen(
                     )
                     Button(
                         onClick = onOpenModerationWorkspace,
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadNavyDark,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .minimumInteractiveComponentSize()
                             .testTag("open_admin_moderation_workspace_button")
                     ) {
-                        Text(copy.openModerationWorkspaceCta)
+                        Text(copy.openModerationWorkspaceCta, color = Color.White, fontWeight = FontWeight.SemiBold)
                     }
                     if (showAdminWorkspace) {
                         AdminWorkspaceSection(
@@ -512,10 +542,13 @@ private fun AdminWorkspaceSection(
                         }
                         Button(
                             onClick = { onModerateReport(report.id, "RESOLVED", "Resolved by Ops Admin") },
-                            colors = ButtonDefaults.buttonColors(containerColor = NirapadPositiveGreen),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NirapadPositiveGreen,
+                                contentColor = Color.White
+                            ),
                             modifier = Modifier.weight(1f).minimumInteractiveComponentSize()
                         ) {
-                            Text("Resolve")
+                            Text("Resolve", color = Color.White)
                         }
                     }
                 }
@@ -530,22 +563,31 @@ private fun AdminWorkspaceSection(
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         listOf("POLICE", "AMBULANCE", "WOMENS_SUPPORT", "HOSPITAL", "SAFE_HUB").forEach { t ->
-            FilterChip(selected = facType == t, onClick = { facType = t }, label = { Text(t) })
+            FilterChip(
+                selected = facType == t,
+                onClick = { facType = t },
+                colors = profileFilterChipColors(),
+                border = profileFilterChipBorder(facType == t),
+                label = { Text(t) }
+            )
         }
     }
-    OutlinedTextField(value = facName, onValueChange = { facName = it }, label = { Text("Facility Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(value = facPhone, onValueChange = { facPhone = it }, label = { Text("Verified Phone") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(value = facAddress, onValueChange = { facAddress = it }, label = { Text("Address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(value = facSource, onValueChange = { facSource = it }, label = { Text("Authoritative Source") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    NirapadOutlinedTextField(value = facName, onValueChange = { facName = it }, label = { Text("Facility Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    NirapadOutlinedTextField(value = facPhone, onValueChange = { facPhone = it }, label = { Text("Verified Phone") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    NirapadOutlinedTextField(value = facAddress, onValueChange = { facAddress = it }, label = { Text("Address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    NirapadOutlinedTextField(value = facSource, onValueChange = { facSource = it }, label = { Text("Authoritative Source") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Button(
         onClick = {
             onAddVerifiedFacility(facType, facName, facPhone, facAddress, facSource)
             facName = ""; facPhone = ""; facAddress = ""; facSource = ""
         },
-        colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = NirapadNavyDark,
+            contentColor = Color.White
+        ),
         modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize()
     ) {
-        Text("Publish Verified Facility")
+        Text("Publish Verified Facility", color = Color.White)
     }
 
     HorizontalDivider(color = NirapadBorderSubtle)
@@ -559,3 +601,19 @@ private fun AdminWorkspaceSection(
         }
     }
 }
+
+@Composable
+private fun profileFilterChipColors() = FilterChipDefaults.filterChipColors(
+    containerColor = Color(0xFFF1F5F9),
+    labelColor = Color(0xFF0F172A),
+    selectedContainerColor = NirapadPrimaryTealContainer,
+    selectedLabelColor = NirapadNavyDark
+)
+
+@Composable
+private fun profileFilterChipBorder(selected: Boolean) = FilterChipDefaults.filterChipBorder(
+    enabled = true,
+    selected = selected,
+    borderColor = Color(0xFF94A3B8),
+    selectedBorderColor = NirapadPrimaryTeal
+)

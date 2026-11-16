@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShareLocation
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -32,7 +33,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -54,6 +54,7 @@ import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
 import com.example.ui.components.DeliberateSosButton
 import com.example.ui.components.NirapadMapCanvas
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCautionAmber
 import com.example.ui.theme.NirapadCautionContainer
@@ -93,7 +94,7 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Top Search Card
@@ -107,7 +108,7 @@ fun HomeScreen(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedTextField(
+                NirapadOutlinedTextField(
                     value = destinationQuery,
                     onValueChange = onDestinationQueryChange,
                     placeholder = { Text(copy.searchDestinationHint) },
@@ -124,14 +125,33 @@ fun HomeScreen(
                     RoutingAndSafetyEngine.destinationPresets.take(3).forEach { preset ->
                         AssistChip(
                             onClick = { onSearchRoutes(preset.label) },
-                            label = { Text(preset.label, style = MaterialTheme.typography.labelMedium) }
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = Color(0xFFF1F5F9),
+                                labelColor = Color(0xFF0F172A),
+                                leadingIconContentColor = NirapadPrimaryTeal
+                            ),
+                            border = AssistChipDefaults.assistChipBorder(
+                                enabled = true,
+                                borderColor = Color(0xFF94A3B8)
+                            ),
+                            label = {
+                                Text(
+                                    text = preset.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color(0xFF0F172A),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         )
                     }
                 }
 
                 Button(
                     onClick = { onSearchRoutes(null) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadPrimaryTeal,
+                        contentColor = Color.White
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -153,6 +173,16 @@ fun HomeScreen(
             breadcrumbs = emptyList(),
             facilities = facilities,
             isDeviated = activeJourney?.state == JourneyState.DEVIATION_DETECTED.value,
+            bearingDegrees = currentLocation.bearingDegrees,
+            hasLiveGpsFix = hasLiveGpsFix,
+            accuracyMeters = currentLocation.accuracyMeters,
+            locationPermissionGranted = locationPermissionGranted,
+            autoFollowByDefault = routes.isEmpty() || activeJourney != null,
+            fullscreenTitle = activeJourney?.let { "Active Journey • ${it.destinationLabel}" } ?: "NIRAPAD Live Safety Map",
+            destinationQuery = destinationQuery,
+            onDestinationQueryChange = onDestinationQueryChange,
+            onSearchDestination = onSearchRoutes,
+            onRequestLocationPermission = onRequestLocationPermission,
             modifier = Modifier.height(230.dp)
         )
 
@@ -191,11 +221,18 @@ fun HomeScreen(
                             color = NirapadNavyDark,
                             fontWeight = FontWeight.SemiBold
                         )
-                        val timeText = if (currentLocation.timestampMillis > 0L) {
-                            val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                            "Last fix ${fmt.format(Date(currentLocation.timestampMillis))} • ±${currentLocation.accuracyMeters.toInt()}m"
-                        } else {
-                            String.format(Locale.US, "Ref %.4f, %.4f (Estimated)", currentLocation.lat, currentLocation.lon)
+                        val timeText = when {
+                            currentLocation.timestampMillis > 0L -> {
+                                val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                                "Last fix ${fmt.format(Date(currentLocation.timestampMillis))} • ±${currentLocation.accuracyMeters.toInt()}m"
+                            }
+                            locationPermissionGranted -> "Waiting for FusedLocationProviderClient GPS fix..."
+                            else -> String.format(
+                                Locale.US,
+                                "Ref %.4f, %.4f (Grant GPS for live coordinates)",
+                                currentLocation.lat,
+                                currentLocation.lon
+                            )
                         }
                         Text(text = timeText, style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
                     }
@@ -203,9 +240,11 @@ fun HomeScreen(
                 if (!locationPermissionGranted) {
                     OutlinedButton(
                         onClick = onRequestLocationPermission,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadPrimaryTeal),
+                        border = BorderStroke(1.dp, NirapadPrimaryTeal),
                         modifier = Modifier.minimumInteractiveComponentSize().testTag("grant_location_button")
                     ) {
-                        Text("Enable GPS")
+                        Text("Enable GPS", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

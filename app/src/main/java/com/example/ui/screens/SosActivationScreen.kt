@@ -60,11 +60,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +102,7 @@ import com.example.data.model.EmergencyContact
 import com.example.data.model.SosSession
 import com.example.data.service.LocationReading
 import com.example.localization.NirapadCopy
+import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.components.SosSignalBeacon
 import com.example.ui.theme.NirapadBorderSubtle
 import com.example.ui.theme.NirapadCanvas
@@ -561,12 +562,24 @@ private fun LazyListScope.sosArmedStageItems(
                     FilterChip(
                         selected = selectedPreset == preset,
                         onClick = { onSelectPreset(preset) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color(0xFFF1F5F9),
+                            labelColor = Color(0xFF0F172A),
+                            selectedContainerColor = NirapadEmergencyContainer,
+                            selectedLabelColor = NirapadNavyDark
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selectedPreset == preset,
+                            borderColor = Color(0xFF94A3B8),
+                            selectedBorderColor = NirapadEmergencyRed
+                        ),
                         label = { Text(preset, maxLines = 1) },
                         modifier = Modifier.testTag("sos_preset_${preset.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "_")}")
                     )
                 }
             }
-            OutlinedTextField(
+            NirapadOutlinedTextField(
                 value = customNote,
                 onValueChange = onCustomNoteChange,
                 label = { Text("Optional Note for Contacts (e.g., Gate 2 Metro)") },
@@ -1169,13 +1182,16 @@ private fun LazyListScope.sosActiveBroadcastItems(
             if (!locationPermissionGranted) {
                 Button(
                     onClick = onRequestLocationPermission,
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadCautionAmber),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadCautionAmber,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .minimumInteractiveComponentSize()
                         .testTag("sos_screen_enable_gps_active_button")
                 ) {
-                    Text("Grant GPS Permission for Continuous Background Updates")
+                    Text("Grant GPS Permission for Continuous Background Updates", fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -1198,6 +1214,8 @@ private fun LazyListScope.sosActiveBroadcastItems(
                 ) {
                     OutlinedButton(
                         onClick = { clipboard.setText(AnnotatedString(activeSos.shareTokenId)) },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -1215,7 +1233,10 @@ private fun LazyListScope.sosActiveBroadcastItems(
                             }
                             context.startActivity(Intent.createChooser(sendIntent, "Share Live SOS Alert"))
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NirapadPrimaryTeal),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .minimumInteractiveComponentSize()
@@ -1223,7 +1244,7 @@ private fun LazyListScope.sosActiveBroadcastItems(
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Share Alert")
+                        Text("Share Alert", color = Color.White)
                     }
                 }
             }
@@ -1387,6 +1408,8 @@ private fun LazyListScope.sosActiveBroadcastItems(
         ) {
             OutlinedButton(
                 onClick = { onUpdateSosStatus(activeSos, "CANCELLED") },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)
@@ -1398,7 +1421,10 @@ private fun LazyListScope.sosActiveBroadcastItems(
             }
             Button(
                 onClick = { onUpdateSosStatus(activeSos, "RESOLVED") },
-                colors = ButtonDefaults.buttonColors(containerColor = NirapadPositiveGreen),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NirapadPositiveGreen,
+                    contentColor = Color.White
+                ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)
@@ -1406,9 +1432,9 @@ private fun LazyListScope.sosActiveBroadcastItems(
                     .minimumInteractiveComponentSize()
                     .testTag("sos_screen_resolve_active_button")
             ) {
-                Icon(Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("I'm Safe (Resolve)", fontWeight = FontWeight.Bold)
+                Text("I'm Safe (Resolve)", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1439,18 +1465,23 @@ private fun DirectEmergencyDispatchStrip() {
             ) {
                 Button(
                     onClick = { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NirapadNavyDark),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NirapadNavyDark,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .minimumInteractiveComponentSize()
                         .testTag("sos_screen_call_112")
                 ) {
-                    Icon(Icons.Default.Call, contentDescription = "Call 112", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Call, contentDescription = "Call 112", tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Call 112", fontWeight = FontWeight.Bold)
+                    Text("Call 112", color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:1091"))) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                    border = BorderStroke(1.dp, Color(0xFF94A3B8)),
                     modifier = Modifier
                         .weight(1f)
                         .minimumInteractiveComponentSize()

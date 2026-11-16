@@ -46,8 +46,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -91,6 +93,7 @@ import com.example.data.firestore.UiState
 import com.example.data.model.JourneyState
 import com.example.data.repository.AiAdvisorRepository
 import com.example.data.repository.NirapadRepository
+import com.example.data.service.DeviceCompassTracker
 import com.example.data.service.LocationTracker
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadStrings
@@ -114,7 +117,9 @@ import com.example.ui.screens.VerifiedEmergencyDirectoryScreen
 import com.example.ui.theme.NirapadCanvas
 import com.example.ui.theme.NirapadNavyDark
 import com.example.ui.theme.NirapadPrimaryTeal
+import com.example.ui.theme.NirapadPrimaryTealContainer
 import com.example.ui.theme.NirapadSurface
+import com.example.ui.theme.NirapadTheme
 import com.example.viewmodel.NirapadViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -218,7 +223,13 @@ private fun AuthenticatedNirapadShell(
 
     val currentLocation by viewModel.currentLocation.collectAsStateWithLifecycle()
     val hasLiveGpsFix by viewModel.hasLiveGpsFix.collectAsStateWithLifecycle()
+    val compassHeading by viewModel.compassHeading.collectAsStateWithLifecycle()
     val locationPermissionGranted by viewModel.locationPermissionGranted.collectAsStateWithLifecycle()
+    val effectiveLocation = remember(currentLocation, compassHeading) {
+        val preferGpsBearing = currentLocation.bearingDegrees != null && (currentLocation.speedMps ?: 0f) >= 0.8f
+        val heading = if (preferGpsBearing) currentLocation.bearingDegrees else (compassHeading ?: currentLocation.bearingDegrees)
+        currentLocation.copy(bearingDegrees = heading)
+    }
     val destinationQuery by viewModel.destinationQuery.collectAsStateWithLifecycle()
     val routeSearchState by viewModel.routeSearchState.collectAsStateWithLifecycle()
     val selectedRoute by viewModel.selectedRoute.collectAsStateWithLifecycle()
@@ -282,9 +293,16 @@ private fun AuthenticatedNirapadShell(
     LaunchedEffect(locationPermissionGranted) {
         if (locationPermissionGranted) {
             val tracker = LocationTracker(context)
-            tracker.observeLocationUpdates().collect { reading ->
+            tracker.observeLocationUpdates(1500L).collect { reading ->
                 viewModel.onLiveLocationReading(reading)
             }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val compass = DeviceCompassTracker(context)
+        compass.observeCompassAzimuth().collect { azimuth ->
+            viewModel.onCompassHeading(azimuth)
         }
     }
 
@@ -342,6 +360,7 @@ private fun AuthenticatedNirapadShell(
 
     val isOnSosActivationScreen = currentRoute.startsWith(NirapadRoutes.SOS_ACTIVATION)
 
+    NirapadTheme(darkTheme = false) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(NirapadCanvas)) {
         val isWideScreen = maxWidth >= 680.dp
 
@@ -446,7 +465,20 @@ private fun AuthenticatedNirapadShell(
                                         contentDescription = dest.label
                                     )
                                 },
-                                label = { Text(dest.label, maxLines = 1) },
+                                label = {
+                                    Text(
+                                        text = dest.label,
+                                        maxLines = 1,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = NirapadPrimaryTeal,
+                                    selectedTextColor = Color(0xFF0F172A),
+                                    indicatorColor = NirapadPrimaryTealContainer,
+                                    unselectedIconColor = Color(0xFF64748B),
+                                    unselectedTextColor = Color(0xFF475569)
+                                ),
                                 modifier = Modifier.testTag(dest.testTag)
                             )
                         }
@@ -478,7 +510,19 @@ private fun AuthenticatedNirapadShell(
                                         contentDescription = dest.label
                                     )
                                 },
-                                label = { Text(dest.label) },
+                                label = {
+                                    Text(
+                                        text = dest.label,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                },
+                                colors = NavigationRailItemDefaults.colors(
+                                    selectedIconColor = NirapadPrimaryTeal,
+                                    selectedTextColor = Color(0xFF0F172A),
+                                    indicatorColor = NirapadPrimaryTealContainer,
+                                    unselectedIconColor = Color(0xFF64748B),
+                                    unselectedTextColor = Color(0xFF475569)
+                                ),
                                 modifier = Modifier.testTag(dest.testTag)
                             )
                         }
@@ -497,7 +541,7 @@ private fun AuthenticatedNirapadShell(
                         composable(NirapadRoutes.HOME) {
                             HomeScreen(
                                 copy = copy,
-                                currentLocation = currentLocation,
+                                currentLocation = effectiveLocation,
                                 hasLiveGpsFix = hasLiveGpsFix,
                                 locationPermissionGranted = locationPermissionGranted,
                                 destinationQuery = destinationQuery,
@@ -529,7 +573,9 @@ private fun AuthenticatedNirapadShell(
                         composable(NirapadRoutes.PLAN) {
                             PlanRouteScreen(
                                 copy = copy,
-                                currentLocation = currentLocation,
+                                currentLocation = effectiveLocation,
+                                hasLiveGpsFix = hasLiveGpsFix,
+                                locationPermissionGranted = locationPermissionGranted,
                                 destinationQuery = destinationQuery,
                                 routeSearchState = routeSearchState,
                                 selectedRoute = selectedRoute,
@@ -537,6 +583,7 @@ private fun AuthenticatedNirapadShell(
                                 facilities = allFacilities,
                                 onDestinationQueryChange = viewModel::updateDestinationQuery,
                                 onSearchRoutes = { viewModel.searchRoutes() },
+                                onRequestLocationPermission = { requestLocationAndNotificationPermissions() },
                                 onSelectRoute = viewModel::selectRoute,
                                 onStartJourney = { share, count, mins ->
                                     viewModel.startJourney(share, count, mins)
@@ -554,7 +601,7 @@ private fun AuthenticatedNirapadShell(
                         composable(NirapadRoutes.ADVISORY_NAVIGATION) {
                             AdvisoryAiNavigationScreen(
                                 copy = copy,
-                                currentLocation = currentLocation,
+                                currentLocation = effectiveLocation,
                                 hasLiveGpsFix = hasLiveGpsFix,
                                 locationPermissionGranted = locationPermissionGranted,
                                 destinationQuery = destinationQuery,
@@ -583,7 +630,9 @@ private fun AuthenticatedNirapadShell(
                         composable(NirapadRoutes.JOURNEY) {
                             JourneyScreen(
                                 copy = copy,
-                                currentLocation = currentLocation,
+                                currentLocation = effectiveLocation,
+                                hasLiveGpsFix = hasLiveGpsFix,
+                                locationPermissionGranted = locationPermissionGranted,
                                 activeJourney = activeJourney,
                                 journeysHistory = journeys.filter { JourneyState.fromValue(it.state).isTerminal },
                                 selectedRoute = selectedRoute,
@@ -591,6 +640,7 @@ private fun AuthenticatedNirapadShell(
                                 deviationDistanceM = deviationDistanceM,
                                 facilities = allFacilities,
                                 shareLookupState = shareLookupState,
+                                onRequestLocationPermission = { requestLocationAndNotificationPermissions() },
                                 onSimulateStep = viewModel::simulateStepAlongOrOffRoute,
                                 onConfirmDeviationOk = viewModel::confirmDeviationIntentional,
                                 onReroute = viewModel::rerouteActiveJourney,
@@ -782,6 +832,7 @@ private fun AuthenticatedNirapadShell(
         ) {
             ActiveSosPulseOverlay(isLiveSharingRunning = isSosServiceRunning)
         }
+    }
     }
 
     if (showAiAdvisor) {

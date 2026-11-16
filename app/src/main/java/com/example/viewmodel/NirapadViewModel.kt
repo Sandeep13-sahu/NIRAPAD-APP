@@ -74,6 +74,9 @@ class NirapadViewModel(
     private val _hasLiveGpsFix = MutableStateFlow(false)
     val hasLiveGpsFix: StateFlow<Boolean> = _hasLiveGpsFix.asStateFlow()
 
+    private val _compassHeading = MutableStateFlow<Float?>(null)
+    val compassHeading: StateFlow<Float?> = _compassHeading.asStateFlow()
+
     private val _locationPermissionGranted = MutableStateFlow(false)
     val locationPermissionGranted: StateFlow<Boolean> = _locationPermissionGranted.asStateFlow()
 
@@ -238,6 +241,10 @@ class NirapadViewModel(
 
     fun setLocationPermission(granted: Boolean) {
         _locationPermissionGranted.value = granted
+    }
+
+    fun onCompassHeading(degrees: Float) {
+        _compassHeading.value = degrees
     }
 
     fun onLiveLocationReading(reading: LocationReading) {

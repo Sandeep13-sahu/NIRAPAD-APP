@@ -27,12 +27,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 import kotlin.math.PI
+import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sinh
 import kotlin.math.tan
 
 private val Context.mapTilePreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -88,6 +92,26 @@ data class MapViewportProjection(
         val sx = ((wx - centerWorldX) * scale + widthPx / 2f).toFloat()
         val sy = ((wy - centerWorldY) * scale + heightPx / 2f).toFloat()
         return sx to sy
+    }
+
+    fun unproject(screenX: Float, screenY: Float): LatLon {
+        val safeScale = max(scale.toDouble(), 0.01)
+        val wx = centerWorldX + (screenX - widthPx / 2.0) / safeScale
+        val wy = centerWorldY + (screenY - heightPx / 2.0) / safeScale
+        return LatLon(
+            lat = SlippyMapMath.worldPxToLat(wy, zoom),
+            lon = SlippyMapMath.worldPxToLon(wx, zoom)
+        )
+    }
+
+    fun panByScreenDelta(dxPx: Float, dyPx: Float): LatLon {
+        val safeScale = max(scale.toDouble(), 0.01)
+        val nextWorldX = centerWorldX + dxPx / safeScale
+        val nextWorldY = centerWorldY + dyPx / safeScale
+        return LatLon(
+            lat = SlippyMapMath.worldPxToLat(nextWorldY, zoom),
+            lon = SlippyMapMath.worldPxToLon(nextWorldX, zoom)
+        )
     }
 
     fun visibleTiles(): List<TilePlacement> {
@@ -151,6 +175,65 @@ object SlippyMapMath {
         val sinLat = sin(Math.toRadians(lat.coerceIn(-MAX_LAT, MAX_LAT)))
         val yNorm = 0.5 - ln((1.0 + sinLat) / (1.0 - sinLat)) / (4.0 * PI)
         return yNorm * worldSize
+    }
+
+    fun worldPxToLon(worldX: Double, zoom: Int): Double {
+        val worldSize = TILE_SIZE_PX * (1 shl zoom)
+        val wrapped = ((worldX % worldSize) + worldSize) % worldSize
+        return (wrapped / worldSize) * 360.0 - 180.0
+    }
+
+    fun worldPxToLat(worldY: Double, zoom: Int): Double {
+        val worldSize = TILE_SIZE_PX * (1 shl zoom)
+        val clampedY = worldY.coerceIn(0.0, worldSize)
+        val n = PI - (2.0 * PI * clampedY) / worldSize
+        val latRad = atan(sinh(n))
+        return Math.toDegrees(latRad).coerceIn(-MAX_LAT, MAX_LAT)
+    }
+
+    fun buildCameraProjection(
+        center: LatLon,
+        continuousZoom: Float,
+        widthPx: Float,
+        heightPx: Float
+    ): MapViewportProjection {
+        val safeW = max(widthPx, 1f)
+        val safeH = max(heightPx, 1f)
+        val clampedZoom = continuousZoom.coerceIn(10.0f, 17.5f)
+        val tileZoom = clampedZoom.roundToInt().coerceIn(10, 17)
+        val scale = 2.0.pow((clampedZoom - tileZoom).toDouble()).toFloat().coerceIn(0.6f, 1.5f)
+        return MapViewportProjection(
+            zoom = tileZoom,
+            centerWorldX = lonToWorldPx(center.lon, tileZoom),
+            centerWorldY = latToWorldPx(center.lat, tileZoom),
+            scale = scale,
+            widthPx = safeW,
+            heightPx = safeH
+        )
+    }
+
+    fun fitCameraState(
+        points: List<LatLon>,
+        fallbackCenter: LatLon,
+        widthPx: Float,
+        heightPx: Float,
+        minZoom: Int = 11,
+        maxZoom: Int = 15
+    ): Pair<LatLon, Float> {
+        val proj = buildProjection(
+            points = points,
+            fallbackCenter = fallbackCenter,
+            widthPx = widthPx,
+            heightPx = heightPx,
+            minZoom = minZoom,
+            maxZoom = maxZoom
+        )
+        val centerLatLon = LatLon(
+            lat = worldPxToLat(proj.centerWorldY, proj.zoom),
+            lon = worldPxToLon(proj.centerWorldX, proj.zoom)
+        )
+        val continuousZoom = (proj.zoom + ln(proj.scale.toDouble()) / ln(2.0)).toFloat().coerceIn(10.5f, 16.5f)
+        return centerLatLon to continuousZoom
     }
 
     fun buildProjection(
@@ -434,8 +517,13 @@ class MapTileCache internal constructor(
             }
         }
 
+        private val isRobolectricEnvironment: Boolean by lazy {
+            Build.FINGERPRINT.contains("robolectric", ignoreCase = true) ||
+                runCatching { Class.forName("org.robolectric.Robolectric") }.isSuccess
+        }
+
         private fun checkNetworkAvailable(context: Context): Boolean {
-            if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) return false
+            if (isRobolectricEnvironment) return false
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                 ?: return false
             val network = cm.activeNetwork ?: return false
@@ -444,7 +532,7 @@ class MapTileCache internal constructor(
         }
 
         private fun fetchOsmTileBytes(coord: TileCoord): ByteArray? {
-            if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) return null
+            if (isRobolectricEnvironment) return null
             val url = "https://tile.openstreetmap.org/${coord.z}/${coord.x}/${coord.y}.png"
             val req = Request.Builder()
                 .url(url)
