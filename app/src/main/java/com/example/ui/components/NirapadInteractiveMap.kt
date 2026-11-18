@@ -55,10 +55,12 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.SatelliteAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -147,9 +149,11 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -176,6 +180,30 @@ private const val ALT_SLATE_INT = 0xFF627D98.toInt()
 private const val MIN_INTERACTIVE_ZOOM = 5.0
 private const val MAX_INTERACTIVE_ZOOM = 19.0
 private const val DEFAULT_GPS_ZOOM = 16.0
+
+enum class MapLayerStyle(val label: String) {
+    STREET("Street"),
+    SATELLITE("Satellite")
+}
+
+internal fun esriWorldImageryTileUrl(zoom: Int, x: Int, y: Int): String =
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$zoom/$y/$x"
+
+internal object EsriWorldImageryTileSource : OnlineTileSourceBase(
+    "EsriWorldImagery",
+    1,
+    19,
+    256,
+    "",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/")
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String {
+        val z = MapTileIndex.getZoom(pMapTileIndex)
+        val y = MapTileIndex.getY(pMapTileIndex)
+        val x = MapTileIndex.getX(pMapTileIndex)
+        return "$baseUrl$z/$y/$x"
+    }
+}
 
 private var osmConfigured = false
 
@@ -235,6 +263,7 @@ fun NirapadMapCanvas(
         ?: remember { mutableStateOf(MapTileCacheStats()) })
 
     var isExpanded by remember { mutableStateOf(false) }
+    var mapLayerStyle by remember { mutableStateOf(MapLayerStyle.STREET) }
     var isFollowingUser by remember(autoFollowByDefault) { mutableStateOf(autoFollowByDefault) }
     var hasLockedInitialLiveFix by remember { mutableStateOf(false) }
     val initialDefaultZoom = if (useNativeOsmDroid) DEFAULT_GPS_ZOOM else 15.0
@@ -413,6 +442,7 @@ fun NirapadMapCanvas(
                 breadcrumbs = breadcrumbs,
                 facilities = facilities,
                 isDeviated = isDeviated,
+                mapLayerStyle = mapLayerStyle,
                 cameraCenter = cameraCenter,
                 cameraZoom = cameraZoom,
                 isFollowingUser = isFollowingUser,
@@ -442,11 +472,15 @@ fun NirapadMapCanvas(
             InlineMapOverlays(
                 expandable = expandable,
                 isOnline = true,
+                mapLayerStyle = mapLayerStyle,
                 renderedTileCount = 1,
                 cachedTileCount = cacheStats.cachedTileCount,
                 isFollowingUser = isFollowingUser,
                 showWaitingGpsOverlay = showWaitingGpsOverlay,
                 onExpand = { isExpanded = true },
+                onToggleLayer = {
+                    mapLayerStyle = if (mapLayerStyle == MapLayerStyle.STREET) MapLayerStyle.SATELLITE else MapLayerStyle.STREET
+                },
                 onRecenter = ::recenterOnLiveLocation,
                 showOsmAttributionPill = true
             )
@@ -461,6 +495,7 @@ fun NirapadMapCanvas(
                 breadcrumbs = breadcrumbs,
                 facilities = facilities,
                 isDeviated = isDeviated,
+                mapLayerStyle = mapLayerStyle,
                 tileCache = tileCache,
                 cacheStats = cacheStats,
                 decodedTiles = decodedTiles,
@@ -492,13 +527,17 @@ fun NirapadMapCanvas(
                 InlineMapOverlays(
                     expandable = expandable,
                     isOnline = isOnline,
+                    mapLayerStyle = mapLayerStyle,
                     renderedTileCount = renderedTileCount,
                     cachedTileCount = cacheStats.cachedTileCount,
                     isFollowingUser = isFollowingUser,
                     showWaitingGpsOverlay = showWaitingGpsOverlay,
                     onExpand = { isExpanded = true },
+                    onToggleLayer = {
+                        mapLayerStyle = if (mapLayerStyle == MapLayerStyle.STREET) MapLayerStyle.SATELLITE else MapLayerStyle.STREET
+                    },
                     onRecenter = ::recenterOnLiveLocation,
-                    showOsmAttributionPill = renderedTileCount > 0
+                    showOsmAttributionPill = renderedTileCount > 0 || mapLayerStyle == MapLayerStyle.SATELLITE
                 )
             }
         }
@@ -532,6 +571,7 @@ fun NirapadMapCanvas(
                         breadcrumbs = breadcrumbs,
                         facilities = facilities,
                         isDeviated = isDeviated,
+                        mapLayerStyle = mapLayerStyle,
                         cameraCenter = cameraCenter,
                         cameraZoom = cameraZoom,
                         isFollowingUser = isFollowingUser,
@@ -565,11 +605,15 @@ fun NirapadMapCanvas(
                         currentLocation = currentLocation,
                         cameraZoom = cameraZoom,
                         isOnline = true,
+                        mapLayerStyle = mapLayerStyle,
                         renderedTileCount = 1,
                         cachedTileCount = cacheStats.cachedTileCount,
                         destinationQuery = destinationQuery,
                         onDestinationQueryChange = onDestinationQueryChange,
                         onSearchDestination = onSearchDestination,
+                        onToggleLayer = {
+                            mapLayerStyle = if (mapLayerStyle == MapLayerStyle.STREET) MapLayerStyle.SATELLITE else MapLayerStyle.STREET
+                        },
                         onMinimize = { isExpanded = false },
                         onZoomIn = {
                             cameraZoom = (cameraZoom + 1.0).coerceIn(MIN_INTERACTIVE_ZOOM, MAX_INTERACTIVE_ZOOM)
@@ -594,6 +638,7 @@ fun NirapadMapCanvas(
                         breadcrumbs = breadcrumbs,
                         facilities = facilities,
                         isDeviated = isDeviated,
+                        mapLayerStyle = mapLayerStyle,
                         tileCache = tileCache,
                         cacheStats = cacheStats,
                         decodedTiles = decodedTiles,
@@ -629,11 +674,15 @@ fun NirapadMapCanvas(
                             currentLocation = currentLocation,
                             cameraZoom = cameraZoom,
                             isOnline = isOnline,
+                            mapLayerStyle = mapLayerStyle,
                             renderedTileCount = renderedTileCount,
                             cachedTileCount = cacheStats.cachedTileCount,
                             destinationQuery = destinationQuery,
                             onDestinationQueryChange = onDestinationQueryChange,
                             onSearchDestination = onSearchDestination,
+                            onToggleLayer = {
+                                mapLayerStyle = if (mapLayerStyle == MapLayerStyle.STREET) MapLayerStyle.SATELLITE else MapLayerStyle.STREET
+                            },
                             onMinimize = { isExpanded = false },
                             onZoomIn = {
                                 cameraZoom = (cameraZoom + 0.7).coerceIn(MIN_INTERACTIVE_ZOOM, MAX_INTERACTIVE_ZOOM)
@@ -654,11 +703,13 @@ fun NirapadMapCanvas(
 private fun androidx.compose.foundation.layout.BoxScope.InlineMapOverlays(
     expandable: Boolean,
     isOnline: Boolean,
+    mapLayerStyle: MapLayerStyle,
     renderedTileCount: Int,
     cachedTileCount: Int,
     isFollowingUser: Boolean,
     showWaitingGpsOverlay: Boolean,
     onExpand: () -> Unit,
+    onToggleLayer: () -> Unit,
     onRecenter: () -> Unit,
     showOsmAttributionPill: Boolean
 ) {
@@ -697,17 +748,30 @@ private fun androidx.compose.foundation.layout.BoxScope.InlineMapOverlays(
         }
     }
 
-    // Top-right: Map cache & OSM connectivity indicator
-    MapCacheStatusBadge(
-        isOnline = isOnline,
-        renderedTileCount = renderedTileCount,
-        cachedTileCount = cachedTileCount,
+    // Top-right: Map cache/connectivity badge + Google-Maps-style Street/Satellite toggle
+    Column(
         modifier = Modifier
             .align(Alignment.TopEnd)
-            .padding(10.dp)
-            .semantics(mergeDescendants = true) {}
-            .testTag("map_cache_status_badge")
-    )
+            .padding(10.dp),
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        MapCacheStatusBadge(
+            isOnline = isOnline,
+            mapLayerStyle = mapLayerStyle,
+            renderedTileCount = renderedTileCount,
+            cachedTileCount = cachedTileCount,
+            modifier = Modifier
+                .semantics(mergeDescendants = true) {}
+                .testTag("map_cache_status_badge")
+        )
+        MapLayerToggleButton(
+            mapLayerStyle = mapLayerStyle,
+            compact = true,
+            onClick = onToggleLayer,
+            modifier = Modifier.testTag("map_layer_toggle_button")
+        )
+    }
 
     if (showWaitingGpsOverlay) {
         Surface(
@@ -760,7 +824,7 @@ private fun androidx.compose.foundation.layout.BoxScope.InlineMapOverlays(
         }
     }
 
-    // Bottom-right: Re-center / My Location floating button + © OSM
+    // Bottom-right: Re-center / My Location floating button + attribution
     Column(
         modifier = Modifier
             .align(Alignment.BottomEnd)
@@ -780,7 +844,7 @@ private fun androidx.compose.foundation.layout.BoxScope.InlineMapOverlays(
                 shape = RoundedCornerShape(6.dp)
             ) {
                 Text(
-                    text = "© OSM",
+                    text = if (mapLayerStyle == MapLayerStyle.SATELLITE) "© Esri" else "© OSM",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF475569),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -800,11 +864,13 @@ private fun androidx.compose.foundation.layout.BoxScope.FullscreenMapOverlays(
     currentLocation: LatLon,
     cameraZoom: Double,
     isOnline: Boolean,
+    mapLayerStyle: MapLayerStyle,
     renderedTileCount: Int,
     cachedTileCount: Int,
     destinationQuery: String?,
     onDestinationQueryChange: ((String) -> Unit)?,
     onSearchDestination: ((String?) -> Unit)?,
+    onToggleLayer: () -> Unit,
     onMinimize: () -> Unit,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
@@ -892,6 +958,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FullscreenMapOverlays(
 
                     MapCacheStatusBadge(
                         isOnline = isOnline,
+                        mapLayerStyle = mapLayerStyle,
                         renderedTileCount = renderedTileCount,
                         cachedTileCount = cachedTileCount
                     )
@@ -966,6 +1033,13 @@ private fun androidx.compose.foundation.layout.BoxScope.FullscreenMapOverlays(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            MapLayerToggleButton(
+                mapLayerStyle = mapLayerStyle,
+                compact = false,
+                onClick = onToggleLayer,
+                modifier = Modifier.testTag("fullscreen_map_layer_toggle_button")
+            )
+
             Surface(
                 color = NirapadSurface.copy(alpha = 0.96f),
                 shape = RoundedCornerShape(14.dp),
@@ -1035,11 +1109,12 @@ private fun androidx.compose.foundation.layout.BoxScope.FullscreenMapOverlays(
                     LegendDot(color = Color(0xFF627D98), label = "Alt")
                     LegendDot(color = NirapadPositiveGreen, label = "Help")
                 }
+                val attrib = if (mapLayerStyle == MapLayerStyle.SATELLITE) "© Esri World Imagery" else "© OpenStreetMap"
                 Text(
                     text = if (selectedRoute != null) {
-                        "${(selectedRoute.durationSeconds / 60).coerceAtLeast(1)} min • © OSM"
+                        "${(selectedRoute.durationSeconds / 60).coerceAtLeast(1)} min • $attrib"
                     } else {
-                        "Z${String.format(Locale.US, "%.1f", cameraZoom)} • © OpenStreetMap"
+                        "Z${String.format(Locale.US, "%.1f", cameraZoom)} • $attrib"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
@@ -1064,6 +1139,7 @@ private fun OsmDroidMapLayer(
     breadcrumbs: List<LatLon>,
     facilities: List<EmergencyFacility>,
     isDeviated: Boolean,
+    mapLayerStyle: MapLayerStyle,
     cameraCenter: LatLon,
     cameraZoom: Double,
     isFollowingUser: Boolean,
@@ -1095,7 +1171,7 @@ private fun OsmDroidMapLayer(
 
     val mapView = remember(context) {
         MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(if (mapLayerStyle == MapLayerStyle.SATELLITE) EsriWorldImageryTileSource else TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             setUseDataConnection(true)
@@ -1105,6 +1181,20 @@ private fun OsmDroidMapLayer(
             controller.setZoom(cameraZoom)
             controller.setCenter(GeoPoint(cameraCenter.lat, cameraCenter.lon))
             overlays.add(beaconOverlay)
+        }
+    }
+
+    var appliedLayerStyle by remember(mapView) { mutableStateOf(mapLayerStyle) }
+    LaunchedEffect(mapView, mapLayerStyle) {
+        if (appliedLayerStyle != mapLayerStyle) {
+            val targetSource = when (mapLayerStyle) {
+                MapLayerStyle.STREET -> TileSourceFactory.MAPNIK
+                MapLayerStyle.SATELLITE -> EsriWorldImageryTileSource
+            }
+            runCatching { mapView.tileProvider.clearTileCache() }
+            mapView.setTileSource(targetSource)
+            mapView.invalidate()
+            appliedLayerStyle = mapLayerStyle
         }
     }
 
@@ -1267,11 +1357,11 @@ private fun OsmDroidMapLayer(
                 }
                 if (activeGeom.size >= 2) {
                     val geoPts = activeGeom.map { GeoPoint(it.lat, it.lon) }
-                    if (isSelected) {
+                    if (isSelected || mapLayerStyle == MapLayerStyle.SATELLITE) {
                         val casing = Polyline(view).apply {
                             setPoints(geoPts)
-                            outlinePaint.color = 0xE6FFFFFF.toInt()
-                            outlinePaint.strokeWidth = 18f
+                            outlinePaint.color = if (isSelected) 0xEBFFFFFF.toInt() else 0xB8FFFFFF.toInt()
+                            outlinePaint.strokeWidth = if (isSelected) 18f else 11f
                             outlinePaint.strokeCap = Paint.Cap.ROUND
                             outlinePaint.strokeJoin = Paint.Join.ROUND
                         }
@@ -1489,6 +1579,7 @@ private fun InteractiveFallbackCanvasLayer(
     breadcrumbs: List<LatLon>,
     facilities: List<EmergencyFacility>,
     isDeviated: Boolean,
+    mapLayerStyle: MapLayerStyle,
     tileCache: MapTileCache?,
     cacheStats: MapTileCacheStats,
     decodedTiles: MutableMap<String, Pair<ImageBitmap, TileOrigin>>,
@@ -1864,8 +1955,53 @@ private fun ReCenterFloatingButton(
 }
 
 @Composable
+private fun MapLayerToggleButton(
+    mapLayerStyle: MapLayerStyle,
+    compact: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isSatellite = mapLayerStyle == MapLayerStyle.SATELLITE
+    val bgColor = if (isSatellite) NirapadNavyDark.copy(alpha = 0.94f) else NirapadSurface.copy(alpha = 0.96f)
+    val fgColor = if (isSatellite) Color.White else Color(0xFF0F172A)
+    val borderColor = if (isSatellite) NirapadPrimaryTeal else NirapadBorderSubtle
+
+    Surface(
+        onClick = onClick,
+        color = bgColor,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, borderColor),
+        shadowElevation = 4.dp,
+        modifier = modifier.minimumInteractiveComponentSize()
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = if (compact) 10.dp else 12.dp,
+                vertical = if (compact) 7.dp else 9.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = if (isSatellite) Icons.Default.Map else Icons.Default.SatelliteAlt,
+                contentDescription = if (isSatellite) "Switch to Street View" else "Switch to Satellite View",
+                tint = fgColor,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = if (isSatellite) "Street" else "Satellite",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = fgColor
+            )
+        }
+    }
+}
+
+@Composable
 private fun MapCacheStatusBadge(
     isOnline: Boolean,
+    mapLayerStyle: MapLayerStyle,
     renderedTileCount: Int,
     cachedTileCount: Int,
     modifier: Modifier = Modifier
@@ -1873,12 +2009,21 @@ private fun MapCacheStatusBadge(
     val statusBg: Color
     val statusFg: Color
     val statusLabel: String
-    val statusIcon = if (!isOnline) Icons.Default.CloudOff else Icons.Default.Map
+    val statusIcon = when {
+        !isOnline -> Icons.Default.CloudOff
+        mapLayerStyle == MapLayerStyle.SATELLITE -> Icons.Default.Layers
+        else -> Icons.Default.Map
+    }
     when {
         !isOnline && renderedTileCount > 0 -> {
             statusBg = NirapadCautionContainer.copy(alpha = 0.95f)
             statusFg = Color(0xFF0F172A)
             statusLabel = "Offline Cache • $cachedTileCount tiles"
+        }
+        mapLayerStyle == MapLayerStyle.SATELLITE -> {
+            statusBg = NirapadSurface.copy(alpha = 0.96f)
+            statusFg = Color(0xFF0F172A)
+            statusLabel = "Satellite • Esri"
         }
         isOnline && renderedTileCount > 0 -> {
             statusBg = NirapadSurface.copy(alpha = 0.94f)

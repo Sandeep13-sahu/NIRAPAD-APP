@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.GpsOff
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShareLocation
@@ -59,6 +62,7 @@ import com.example.data.model.LatLon
 import com.example.data.model.NearbyPoliceStation
 import com.example.data.model.PlaceSuggestion
 import com.example.data.model.RouteOption
+import com.example.data.model.RouteProgress
 import com.example.data.model.WeatherContext
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
@@ -106,7 +110,9 @@ fun HomeScreen(
     isSearchingPlaces: Boolean = false,
     onSelectPlaceSuggestion: (PlaceSuggestion) -> Unit = {},
     onDismissSuggestions: () -> Unit = {},
-    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList()
+    nearbyPoliceStations: List<NearbyPoliceStation> = emptyList(),
+    onStartJourney: (String?) -> Unit = {},
+    routeProgress: RouteProgress? = null
 ) {
     Column(
         modifier = modifier
@@ -190,21 +196,57 @@ fun HomeScreen(
                     }
                 }
 
-                Button(
-                    onClick = { onSearchRoutes(null) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = NirapadPrimaryTeal,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .minimumInteractiveComponentSize()
-                        .testTag("home_compare_routes_button")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Directions, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(copy.compareRoutesCta, fontWeight = FontWeight.SemiBold)
+                    OutlinedButton(
+                        onClick = { onSearchRoutes(null) },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NirapadNavyDark),
+                        border = BorderStroke(1.5.dp, NirapadPrimaryTeal),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 50.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("home_compare_routes_button")
+                    ) {
+                        Icon(Icons.Default.Directions, contentDescription = null, tint = NirapadPrimaryTeal, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = copy.compareRoutesCta,
+                            fontWeight = FontWeight.SemiBold,
+                            color = NirapadNavyDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Button(
+                        onClick = { onStartJourney(null) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NirapadPrimaryTeal,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 50.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("home_start_journey_button")
+                    ) {
+                        Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Start Journey",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -335,34 +377,124 @@ fun HomeScreen(
             }
         }
 
+        // Active Route Preview Card (when a route is selected/loaded and no journey is active)
+        val previewRoute = selectedRoute ?: routes.firstOrNull()
+        if (activeJourney == null && previewRoute != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = NirapadSurface),
+                border = BorderStroke(1.dp, NirapadPrimaryTeal.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().testTag("home_route_preview_card")
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Active Route Preview",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = NirapadPrimaryTeal,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = previewRoute.label,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = previewRoute.safetyLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = NirapadTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("home_route_preview_distance")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text(
+                                text = RoutingAndSafetyEngine.formatDistanceMeters(previewRoute.distanceMeters),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "ETA ${RoutingAndSafetyEngine.formatDurationMinutes(previewRoute.durationSeconds)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF334155)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Active Journey Banner (if any)
         if (activeJourney != null) {
+            val bannerDistanceText = when {
+                routeProgress != null && routeProgress.hasArrived -> "Arrived at destination"
+                routeProgress != null -> "${RoutingAndSafetyEngine.formatDistanceMeters(routeProgress.remainingDistanceMeters)} left • ETA ${RoutingAndSafetyEngine.formatDurationMinutes(routeProgress.remainingDurationSeconds)}"
+                activeJourney.totalDistanceKm > 0.0 -> "Total ${RoutingAndSafetyEngine.formatDistanceKm(activeJourney.totalDistanceKm)} • ${activeJourney.durationMinutes.coerceAtLeast(1L)} min"
+                else -> "Calculating road distance..."
+            }
             Surface(
                 onClick = onOpenJourney,
                 color = NirapadPrimaryTealContainer,
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, NirapadPrimaryTeal),
-                modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize()
+                modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().testTag("home_active_journey_banner")
             ) {
-                Row(
+                Column(
                     modifier = Modifier.padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Active Journey: ${activeJourney.state}",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = NirapadNavyDark,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "To ${activeJourney.destinationLabel} • ${if (activeJourney.sharingEnabled) "Sharing ON (${activeJourney.sharedContactCount})" else "Sharing OFF"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = NirapadNavyDark
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Active Journey: ${activeJourney.state}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(0xFF0F172A),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "To ${activeJourney.destinationLabel} • ${if (activeJourney.sharingEnabled) "Sharing ON (${activeJourney.sharedContactCount})" else "Sharing OFF"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = bannerDistanceText,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+                        Text("Open HUD", style = MaterialTheme.typography.labelLarge, color = NirapadPrimaryTeal, fontWeight = FontWeight.Bold)
+                    }
+                    if (routeProgress != null) {
+                        LinearProgressIndicator(
+                            progress = { routeProgress.progressFraction },
+                            color = NirapadPrimaryTeal,
+                            trackColor = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.fillMaxWidth().height(6.dp)
                         )
                     }
-                    Text("Open HUD", style = MaterialTheme.typography.labelLarge, color = NirapadPrimaryTeal, fontWeight = FontWeight.Bold)
                 }
             }
         }

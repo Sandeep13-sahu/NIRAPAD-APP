@@ -1,10 +1,13 @@
 package com.example.data.repository
 
+import com.example.data.model.CrowdActivityTier
 import com.example.data.model.DataProvenance
 import com.example.data.model.LatLon
+import com.example.data.model.NearbyPoliceStation
 import com.example.data.model.RouteOption
 import com.example.data.model.SafetyFactor
 import com.example.data.model.SafetyTier
+import com.example.data.model.WeatherContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -120,5 +123,73 @@ class AiAdvisorRepositoryTest {
         assertEquals("route_3", second.routeId)
         assertFalse(second.isSaferOption)
         assertEquals(0, second.streetLightingScore)
+    }
+
+    @Test
+    fun buildContextAwareFallbackAdvice_usesLiveRoutePoliceAndWeatherInEnglishAndHindi() {
+        val policeStations = listOf(
+            NearbyPoliceStation(
+                id = "ps_1",
+                name = "Kotwali Police Station",
+                phone = "0612-2221100",
+                locality = "Fraser Road, Patna",
+                lat = 25.6090,
+                lon = 85.1390,
+                distanceMeters = 1200.0
+            )
+        )
+        val context = SafetyAiContext(
+            currentAddressLabel = "Kankarbagh Main Road, Patna",
+            currentLatLon = LatLon(25.5941, 85.1376),
+            weatherContext = WeatherContext(
+                temperatureCelsius = 23.0,
+                precipitationMm = 0.0,
+                isDay = false,
+                conditionLabel = "Night",
+                fetchedAtMillis = 1_700_000_000_000L
+            ),
+            nearestPoliceStation = policeStations.first(),
+            nearbyPoliceStations = policeStations,
+            destinationLabel = "Patna Junction"
+        )
+        val route = sampleRoutes.first().copy(
+            crowdActivityTier = CrowdActivityTier.HIGH_CROWD_WELL_LIT,
+            crowdPoiCount = 15,
+            litCount = 7
+        )
+
+        val routeSafeReply = AiAdvisorRepository.buildContextAwareFallbackAdvice(
+            question = "Is my current route safe right now?",
+            selectedRoute = route,
+            activeJourneyState = "ACTIVE",
+            languageCode = "en",
+            safetyContext = context
+        )
+        assertTrue(routeSafeReply.contains("Kankarbagh Main Road, Patna"))
+        assertTrue(routeSafeReply.contains("Patna Junction"))
+        assertTrue(routeSafeReply.contains("15 active POIs"))
+        assertTrue(routeSafeReply.contains("Kotwali Police Station"))
+
+        val policeReply = AiAdvisorRepository.buildContextAwareFallbackAdvice(
+            question = "Nearest police & safe spots",
+            selectedRoute = route,
+            activeJourneyState = "ACTIVE",
+            languageCode = "en",
+            safetyContext = context
+        )
+        assertTrue(policeReply.contains("Kotwali Police Station"))
+        assertTrue(policeReply.contains("0612-2221100"))
+        assertTrue(policeReply.contains("112"))
+
+        val followedReplyHi = AiAdvisorRepository.buildContextAwareFallbackAdvice(
+            question = "अगर कोई पीछा कर रहा हो तो क्या करें?",
+            selectedRoute = route,
+            activeJourneyState = "ACTIVE",
+            languageCode = "hi",
+            safetyContext = context
+        )
+        assertTrue(followedReplyHi.contains("Kotwali Police Station"))
+        assertTrue(followedReplyHi.contains("1091"))
+        assertTrue(followedReplyHi.contains("112"))
     }
 }

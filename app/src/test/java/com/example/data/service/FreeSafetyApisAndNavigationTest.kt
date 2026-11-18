@@ -322,12 +322,22 @@ class FreeSafetyApisAndNavigationTest {
         val midProgress = RoutingAndSafetyEngine.computeRouteProgress(
             currentLocation = LatLon(25.5975, 85.1376),
             route = route,
-            destination = dest
+            destination = dest,
+            speedKmh = 24.0
         )
         assertFalse(midProgress.hasArrived)
         assertEquals("Turn left onto Station Road", midProgress.activeStep?.instruction)
         assertTrue(midProgress.remainingDistanceMeters in 650..780)
+        assertEquals(1000, midProgress.totalDistanceMeters)
+        assertTrue(midProgress.coveredDistanceMeters in 220..350)
+        assertTrue(midProgress.progressFraction in 0.2f..0.4f)
+        assertEquals(24.0, midProgress.speedKmh ?: 0.0, 0.01)
         assertEquals(LatLon(25.5975, 85.1376), midProgress.remainingPolyline.first())
+
+        assertEquals("850 m", RoutingAndSafetyEngine.formatDistanceMeters(850))
+        assertEquals("4.2 km", RoutingAndSafetyEngine.formatDistanceMeters(4200))
+        assertEquals("650 m", RoutingAndSafetyEngine.formatDistanceKm(0.65))
+        assertEquals("4.2 km", RoutingAndSafetyEngine.formatDistanceKm(4.2))
 
         // Within 20 meters of destination -> hasArrived triggers!
         val arrivedProgress = RoutingAndSafetyEngine.computeRouteProgress(
@@ -337,6 +347,8 @@ class FreeSafetyApisAndNavigationTest {
         )
         assertTrue(arrivedProgress.distanceToDestinationMeters <= 35.0)
         assertTrue(arrivedProgress.hasArrived)
+        assertEquals(1.0f, arrivedProgress.progressFraction, 0.001f)
+        assertEquals(arrivedProgress.totalDistanceMeters, arrivedProgress.coveredDistanceMeters)
     }
 
     @Test

@@ -188,6 +188,8 @@ data class Journey(
     val lastLocationAt: Timestamp? = null,
     val startedAt: Timestamp? = null,
     val endedAt: Timestamp? = null,
+    val totalDistanceKm: Double = 0.0,
+    val durationMinutes: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -392,7 +394,11 @@ data class RouteProgress(
     val distanceToDestinationMeters: Double,
     val activeStep: NavigationStep?,
     val distanceToNextStepMeters: Int,
-    val hasArrived: Boolean
+    val hasArrived: Boolean,
+    val totalDistanceMeters: Int = remainingDistanceMeters,
+    val coveredDistanceMeters: Int = 0,
+    val progressFraction: Float = if (hasArrived) 1f else 0f,
+    val speedKmh: Double? = null
 )
 
 data class SafetyFactor(

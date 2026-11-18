@@ -67,6 +67,7 @@ import com.example.data.model.RouteSearchResult
 import com.example.data.model.SafetyFactor
 import com.example.data.model.WeatherContext
 import com.example.data.service.LocationReading
+import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.NirapadCopy
 import com.example.ui.components.NirapadMapCanvas
 import com.example.ui.components.NirapadOutlinedTextField
@@ -424,18 +425,29 @@ private fun RouteOptionCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(route.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NirapadNavyDark)
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(route.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                     Text(route.providerName, style = MaterialTheme.typography.bodySmall, color = NirapadTextSecondary)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.DirectionsWalk, contentDescription = null, tint = NirapadPrimaryTeal, modifier = Modifier.size(18.dp))
-                    Text(
-                        text = "${(route.durationSeconds / 60).coerceAtLeast(1)} min • ${String.format("%.1f km", route.distanceMeters / 1000.0)}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = NirapadNavyDark
-                    )
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("route_distance_eta_${route.id}")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.DirectionsWalk, contentDescription = null, tint = NirapadPrimaryTeal, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "${RoutingAndSafetyEngine.formatDistanceMeters(route.distanceMeters)} • ${RoutingAndSafetyEngine.formatDurationMinutes(route.durationSeconds)}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
                 }
             }
 

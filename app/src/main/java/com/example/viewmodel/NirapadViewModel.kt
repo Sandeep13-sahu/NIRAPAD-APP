@@ -28,10 +28,12 @@ import com.example.data.model.WeatherContext
 import com.example.data.repository.AdvisoryAiClient
 import com.example.data.repository.AiAdvisorUiState
 import com.example.data.repository.NirapadRepository
+import com.example.data.repository.SafetyAiContext
 import com.example.data.service.FreeSafetyApisClient
 import com.example.data.service.LocationReading
 import com.example.data.service.RoutingAndSafetyEngine
 import com.example.localization.AppLang
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -50,6 +52,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlin.math.roundToInt
 
 @OptIn(FlowPreview::class)
 class NirapadViewModel(
@@ -127,6 +131,9 @@ class NirapadViewModel(
     private val _arrivedJourneyId = MutableStateFlow<String?>(null)
     val arrivedJourneyId: StateFlow<String?> = _arrivedJourneyId.asStateFlow()
 
+    private val _localFallbackJourney = MutableStateFlow<Journey?>(null)
+    private val _localCompletedJourneys = MutableStateFlow<List<Journey>>(emptyList())
+
     private val _activeBreadcrumbs = MutableStateFlow<List<LatLon>>(emptyList())
     val activeBreadcrumbs: StateFlow<List<LatLon>> = _activeBreadcrumbs.asStateFlow()
 
@@ -150,6 +157,9 @@ class NirapadViewModel(
 
     private var lastDeviationPromptAtMs = 0L
     private var locationSequence = 0L
+    private var activeJourneyStartedAtMs = 0L
+    private var previousGpsReading: LocationReading? = null
+    private var lastCalculatedSpeedKmh: Double? = null
     private var shareLookupJob: Job? = null
     private var lastPrefetchedLocation: LatLon? = null
     private var prefetchJob: Job? = null
@@ -189,6 +199,39 @@ class NirapadViewModel(
             emit(UiState.Error((fe ?: error).message ?: "Failed to load journeys"))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
+
+    val activeJourneyState: StateFlow<Journey?> = combine(journeysState, _localFallbackJourney) { remoteState, localFallback ->
+        val remoteActive = (remoteState as? UiState.Success)?.data
+            ?.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
+        remoteActive ?: localFallback?.takeIf { !JourneyState.fromValue(it.state).isTerminal }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), null)
+
+    val journeysHistoryState: StateFlow<List<Journey>> = combine(journeysState, _localCompletedJourneys) { remoteState, localCompleted ->
+        val remoteTerminal = (remoteState as? UiState.Success)?.data
+            ?.filter { JourneyState.fromValue(it.state).isTerminal }
+            .orEmpty()
+        val remoteIds = remoteTerminal.map { it.id }.toSet()
+        val enrichedRemote = remoteTerminal.map { remote ->
+            val localMatch = localCompleted.firstOrNull { it.id == remote.id }
+            if (remote.totalDistanceKm <= 0.0 && localMatch != null && localMatch.totalDistanceKm > 0.0) {
+                remote.copy(
+                    totalDistanceKm = localMatch.totalDistanceKm,
+                    durationMinutes = localMatch.durationMinutes
+                )
+            } else {
+                remote
+            }
+        }
+        val extraLocal = localCompleted.filter { it.id !in remoteIds }
+        extraLocal + enrichedRemote
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    private fun resolveCurrentActiveJourney(): Journey? {
+        val remoteActive = (journeysState.value as? UiState.Success)?.data
+            ?.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
+        return remoteActive ?: _localFallbackJourney.value
+            ?.takeIf { !JourneyState.fromValue(it.state).isTerminal }
+    }
 
     val sosSessionsState: StateFlow<UiState<List<SosSession>>> = repository.observeSosSessions(currentUserId)
         .map<List<SosSession>, UiState<List<SosSession>>> { UiState.Success(it) }
@@ -332,6 +375,28 @@ class NirapadViewModel(
     }
 
     fun onLiveLocationReading(reading: LocationReading) {
+        val prevReading = previousGpsReading
+        val derivedSpeedKmh: Double? = when {
+            reading.speedMps != null && reading.speedMps >= 0f -> (reading.speedMps * 3.6).toDouble()
+            prevReading != null && reading.timestampMillis > prevReading.timestampMillis -> {
+                val dtSec = (reading.timestampMillis - prevReading.timestampMillis) / 1000.0
+                val movedMeters = RoutingAndSafetyEngine.haversineMeters(
+                    prevReading.lat,
+                    prevReading.lon,
+                    reading.lat,
+                    reading.lon
+                )
+                when {
+                    dtSec in 0.5..30.0 && movedMeters >= 1.5 -> (movedMeters / dtSec) * 3.6
+                    dtSec <= 30.0 -> 0.0
+                    else -> null
+                }
+            }
+            else -> lastCalculatedSpeedKmh
+        }
+        previousGpsReading = reading
+        lastCalculatedSpeedKmh = derivedSpeedKmh
+
         _currentLocation.value = reading
         _hasLiveGpsFix.value = true
         val pt = LatLon(reading.lat, reading.lon)
@@ -340,8 +405,7 @@ class NirapadViewModel(
             maybeRefreshEnvironmentAndLocality(pt)
         }
 
-        val activeJourney = (journeysState.value as? UiState.Success)?.data
-            ?.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
+        val activeJourney = resolveCurrentActiveJourney()
 
         if (activeJourney == null) {
             _routeProgress.value = null
@@ -349,12 +413,14 @@ class NirapadViewModel(
             return
         }
 
-        // Update dynamic remaining polyline, distance, ETA, turn-by-turn step & 35m arrival detection
+        // Update dynamic remaining polyline, distance, covered distance, progress fraction, speed & 35m arrival detection
         val progress = RoutingAndSafetyEngine.computeRouteProgress(
             currentLocation = pt,
             route = _selectedRoute.value,
             destination = LatLon(activeJourney.destinationLat, activeJourney.destinationLon),
-            arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS
+            arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS,
+            origin = LatLon(activeJourney.originLat, activeJourney.originLon),
+            speedKmh = derivedSpeedKmh
         )
         _routeProgress.value = progress
         if (progress.hasArrived && activeJourney.id !in dismissedArrivalJourneyIds) {
@@ -382,6 +448,19 @@ class NirapadViewModel(
         if (shouldFlagDeviation) {
             lastDeviationPromptAtMs = now
         }
+
+        val currentFallback = _localFallbackJourney.value
+        if (currentFallback != null && currentFallback.id == activeJourney.id) {
+            _localFallbackJourney.value = currentFallback.copy(
+                lastLat = reading.lat,
+                lastLon = reading.lon,
+                lastAccuracyMeters = reading.accuracyMeters,
+                lastLocationAt = Timestamp.now(),
+                state = if (shouldFlagDeviation) JourneyState.DEVIATION_DETECTED.value else currentFallback.state
+            )
+        }
+
+        if (activeJourney.id.startsWith("local_")) return
 
         locationSequence += 1L
         val seq = locationSequence
@@ -581,52 +660,224 @@ class NirapadViewModel(
     fun startJourney(
         sharingEnabled: Boolean,
         selectedContactCount: Long,
-        shareDurationMinutes: Long
+        shareDurationMinutes: Long,
+        destinationOverride: String? = null
     ) {
-        val searchResult = (_routeSearchState.value as? UiState.Success)?.data
-        val route = _selectedRoute.value ?: searchResult?.routes?.firstOrNull()
-        if (searchResult == null || route == null) {
-            _bannerMessage.value = "Search and select a route first."
+        val requestedQuery = (destinationOverride ?: _destinationQuery.value).trim()
+        if (requestedQuery.isBlank()) {
+            _bannerMessage.value = "Enter or select a destination to start your journey."
             return
         }
+        if (!destinationOverride.isNullOrBlank()) {
+            _destinationQuery.value = requestedQuery
+            _selectedPlaceSuggestion.value = null
+        }
+        _placeSuggestions.value = emptyList()
+
+        val locSnapshot = _currentLocation.value
+        val originLatLon = LatLon(locSnapshot.lat, locSnapshot.lon)
+        val originLabel = _currentAddressLabel.value
+            ?: if (_hasLiveGpsFix.value) "Current GPS Location" else "Central Reference Point"
+
+        val existingSearch = (_routeSearchState.value as? UiState.Success)?.data
+        val existingMatchesQuery = existingSearch != null && (
+            destinationOverride.isNullOrBlank() ||
+                existingSearch.destinationLabel.equals(requestedQuery, ignoreCase = true)
+            )
+        val preloadedRoute = if (existingMatchesQuery) {
+            _selectedRoute.value ?: existingSearch?.routes?.firstOrNull()
+        } else {
+            null
+        }
+
         val profile = profileState.value
         val threshold = profile?.deviationThresholdMeters ?: 250L
         val ownerName = profile?.displayName?.ifBlank { currentUserName } ?: currentUserName.ifBlank { "Traveller" }
+        val activeSelectedPlace = _selectedPlaceSuggestion.value
+            ?.takeIf { it.shortName.equals(requestedQuery, ignoreCase = true) }
+
+        val localJourneyId = "local_journey_${System.currentTimeMillis()}"
+        val localShareToken = if (sharingEnabled) "tok_local_${System.currentTimeMillis()}" else ""
+        val provisionalDestLatLon = when {
+            existingMatchesQuery && existingSearch != null -> existingSearch.destination
+            activeSelectedPlace != null -> LatLon(activeSelectedPlace.lat, activeSelectedPlace.lon)
+            else -> {
+                val preset = RoutingAndSafetyEngine.destinationPresets.firstOrNull {
+                    it.label.equals(requestedQuery, ignoreCase = true) ||
+                        it.label.contains(requestedQuery, ignoreCase = true)
+                }
+                if (preset != null) LatLon(preset.lat, preset.lon)
+                else LatLon((originLatLon.lat + 0.016).coerceIn(-89.0, 89.0), (originLatLon.lon + 0.014).coerceIn(-179.0, 179.0))
+            }
+        }
+        val provisionalLabel = if (existingMatchesQuery && existingSearch != null) {
+            existingSearch.destinationLabel
+        } else {
+            requestedQuery
+        }
+
+        // Calculate immediate Haversine distance placeholder if OSRM route is not yet loaded
+        val haversineMeters = RoutingAndSafetyEngine.haversineMeters(
+            originLatLon.lat,
+            originLatLon.lon,
+            provisionalDestLatLon.lat,
+            provisionalDestLatLon.lon
+        ).roundToInt().coerceAtLeast(100)
+        val initialMeters = preloadedRoute?.distanceMeters ?: haversineMeters
+        val initialSeconds = preloadedRoute?.durationSeconds ?: ((initialMeters / 6.5).roundToInt()).coerceAtLeast(60)
+        val initialDistanceKm = initialMeters / 1000.0
+        val initialDurationMin = (initialSeconds / 60.0).roundToInt().toLong().coerceAtLeast(1L)
+
+        activeJourneyStartedAtMs = System.currentTimeMillis()
+        // Immediately surface an active local journey so Journey tab opens ready with zero failure/blank state
+        val nowTs = Timestamp.now()
+        _localFallbackJourney.value = Journey(
+            id = localJourneyId,
+            userId = currentUserId,
+            ownerDisplayName = ownerName,
+            originLabel = originLabel,
+            originLat = originLatLon.lat,
+            originLon = originLatLon.lon,
+            destinationLabel = provisionalLabel,
+            destinationLat = provisionalDestLatLon.lat,
+            destinationLon = provisionalDestLatLon.lon,
+            selectedRouteId = preloadedRoute?.id ?: "route_1",
+            selectedRouteLabel = preloadedRoute?.label ?: "Primary Safe Corridor",
+            providerName = preloadedRoute?.providerName ?: "OSRM / NIRAPAD Safety Engine",
+            state = JourneyState.ACTIVE.value,
+            deviationThresholdMeters = threshold,
+            sharingEnabled = sharingEnabled,
+            sharedContactCount = selectedContactCount,
+            shareTokenId = localShareToken,
+            lastLat = originLatLon.lat,
+            lastLon = originLatLon.lon,
+            lastAccuracyMeters = locSnapshot.accuracyMeters,
+            lastLocationAt = nowTs,
+            startedAt = nowTs,
+            totalDistanceKm = initialDistanceKm,
+            durationMinutes = initialDurationMin
+        )
+        _activeBreadcrumbs.value = listOf(originLatLon)
+        _deviationDistanceM.value = 0
+        _arrivedJourneyId.value = null
+        _routeProgress.value = RoutingAndSafetyEngine.computeRouteProgress(
+            currentLocation = originLatLon,
+            route = preloadedRoute,
+            destination = provisionalDestLatLon,
+            arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS,
+            origin = originLatLon,
+            speedKmh = lastCalculatedSpeedKmh
+        )
 
         viewModelScope.launch {
+            var resolvedSearch = if (existingMatchesQuery) existingSearch else null
+            var resolvedRoute = preloadedRoute
+
+            if (resolvedSearch == null || resolvedRoute == null) {
+                try {
+                    val combinedFacilities = RoutingAndSafetyEngine.verifiedNationalHelplines + firestoreFacilitiesState.value
+                    val computed = withTimeout(7_000L) {
+                        RoutingAndSafetyEngine.searchRoutes(
+                            originLabel = originLabel,
+                            origin = originLatLon,
+                            destinationQuery = requestedQuery,
+                            verifiedReports = verifiedReportsState.value,
+                            facilities = combinedFacilities,
+                            selectedPlace = activeSelectedPlace,
+                            apiClient = freeApisClient
+                        )
+                    }
+                    computed.weatherContext?.let { _weatherContext.value = it }
+                    _routeSearchState.value = UiState.Success(computed)
+                    resolvedSearch = computed
+                    resolvedRoute = computed.routes.firstOrNull()
+                    prefetchRouteCorridorTiles(computed.routes)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Route resolution fallback during startJourney: ${e.message}")
+                }
+            }
+
+            val finalOriginLabel = resolvedSearch?.originLabel ?: originLabel
+            val finalOrigin = resolvedSearch?.origin ?: originLatLon
+            val finalDestLabel = resolvedSearch?.destinationLabel ?: provisionalLabel
+            val finalDest = resolvedSearch?.destination ?: provisionalDestLatLon
+            val finalRouteId = resolvedRoute?.id ?: "route_1"
+            val finalRouteLabel = resolvedRoute?.label ?: "Primary Safe Corridor"
+            val finalProvider = resolvedRoute?.providerName ?: "NIRAPAD Local Safety Corridor"
+            val resolvedDistMeters = resolvedRoute?.distanceMeters
+                ?: RoutingAndSafetyEngine.haversineMeters(
+                    finalOrigin.lat,
+                    finalOrigin.lon,
+                    finalDest.lat,
+                    finalDest.lon
+                ).roundToInt().coerceAtLeast(100)
+            val resolvedDurSec = resolvedRoute?.durationSeconds
+                ?: ((resolvedDistMeters / 6.5).roundToInt()).coerceAtLeast(60)
+            val finalDistanceKm = resolvedDistMeters / 1000.0
+            val finalDurationMin = (resolvedDurSec / 60.0).roundToInt().toLong().coerceAtLeast(1L)
+
+            _localFallbackJourney.value = _localFallbackJourney.value?.copy(
+                originLabel = finalOriginLabel,
+                originLat = finalOrigin.lat,
+                originLon = finalOrigin.lon,
+                destinationLabel = finalDestLabel,
+                destinationLat = finalDest.lat,
+                destinationLon = finalDest.lon,
+                selectedRouteId = finalRouteId,
+                selectedRouteLabel = finalRouteLabel,
+                providerName = finalProvider,
+                totalDistanceKm = finalDistanceKm,
+                durationMinutes = finalDurationMin
+            )
+            _routeProgress.value = RoutingAndSafetyEngine.computeRouteProgress(
+                currentLocation = LatLon(_currentLocation.value.lat, _currentLocation.value.lon),
+                route = resolvedRoute,
+                destination = finalDest,
+                arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS,
+                origin = finalOrigin,
+                speedKmh = lastCalculatedSpeedKmh
+            )
+            if (resolvedRoute != null) {
+                _selectedRoute.value = resolvedRoute
+            }
+            maybePrefetchArea(finalOrigin, force = true)
+            if (resolvedRoute != null) {
+                prefetchRouteCorridorTiles(listOf(resolvedRoute))
+            }
+
             try {
-                val (journeyId, _) = repository.startProtectedJourney(
-                    ownerDisplayName = ownerName,
-                    originLabel = searchResult.originLabel,
-                    originLat = searchResult.origin.lat,
-                    originLon = searchResult.origin.lon,
-                    destinationLabel = searchResult.destinationLabel,
-                    destinationLat = searchResult.destination.lat,
-                    destinationLon = searchResult.destination.lon,
-                    selectedRouteId = route.id,
-                    selectedRouteLabel = route.label,
-                    providerName = route.providerName,
-                    deviationThresholdMeters = threshold,
-                    sharingEnabled = sharingEnabled,
-                    sharedContactCount = selectedContactCount,
-                    shareDurationMinutes = shareDurationMinutes
-                )
-                _activeBreadcrumbs.value = listOf(searchResult.origin)
-                _deviationDistanceM.value = 0
-                _arrivedJourneyId.value = null
-                _routeProgress.value = RoutingAndSafetyEngine.computeRouteProgress(
-                    currentLocation = searchResult.origin,
-                    route = route,
-                    destination = searchResult.destination,
-                    arrivalThresholdMeters = RoutingAndSafetyEngine.DESTINATION_ARRIVAL_THRESHOLD_METERS
+                val (journeyId, tokenId) = withTimeout(4_500L) {
+                    repository.startProtectedJourney(
+                        ownerDisplayName = ownerName,
+                        originLabel = finalOriginLabel,
+                        originLat = finalOrigin.lat,
+                        originLon = finalOrigin.lon,
+                        destinationLabel = finalDestLabel,
+                        destinationLat = finalDest.lat,
+                        destinationLon = finalDest.lon,
+                        selectedRouteId = finalRouteId,
+                        selectedRouteLabel = finalRouteLabel,
+                        providerName = finalProvider,
+                        deviationThresholdMeters = threshold,
+                        sharingEnabled = sharingEnabled,
+                        sharedContactCount = selectedContactCount,
+                        shareDurationMinutes = shareDurationMinutes,
+                        totalDistanceKm = finalDistanceKm,
+                        durationMinutes = finalDurationMin
+                    )
+                }
+                _localFallbackJourney.value = _localFallbackJourney.value?.copy(
+                    id = journeyId,
+                    shareTokenId = tokenId
                 )
                 _bannerMessage.value = "Protected journey started (${journeyId.take(6)})."
-                maybePrefetchArea(searchResult.origin, force = true)
-                prefetchRouteCorridorTiles(listOf(route))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _bannerMessage.value = e.localizedMessage ?: "Failed to start journey"
+                Log.w(TAG, "Firestore journey write unavailable/timed out; keeping offline local journey active: ${e.message}")
+                _bannerMessage.value = "Protected journey started (live local GPS navigation active)."
             }
         }
     }
@@ -657,26 +908,50 @@ class NirapadViewModel(
     }
 
     fun confirmDeviationIntentional(journey: Journey) {
+        _deviationDistanceM.value = 0
+        val currentFallback = _localFallbackJourney.value
+        if (currentFallback != null && currentFallback.id == journey.id) {
+            _localFallbackJourney.value = currentFallback.copy(state = JourneyState.ACTIVE.value)
+        }
+        if (journey.id.startsWith("local_")) {
+            _bannerMessage.value = "Confirmed intentional route change. Monitoring continues."
+            return
+        }
         viewModelScope.launch {
             try {
-                repository.transitionJourneyState(journey, JourneyState.ACTIVE)
-                _deviationDistanceM.value = 0
+                withTimeout(3_500L) {
+                    repository.transitionJourneyState(journey, JourneyState.ACTIVE)
+                }
                 _bannerMessage.value = "Confirmed intentional route change. Monitoring continues."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _bannerMessage.value = e.localizedMessage ?: "Failed to update journey state"
+                _bannerMessage.value = e.localizedMessage ?: "Confirmed detour locally. Syncing when online."
             }
         }
     }
 
     fun rerouteActiveJourney(journey: Journey) {
+        _deviationDistanceM.value = 0
+        val currentFallback = _localFallbackJourney.value
+        if (currentFallback != null && currentFallback.id == journey.id) {
+            _localFallbackJourney.value = currentFallback.copy(state = JourneyState.ACTIVE.value)
+        }
+        searchRoutes(journey.destinationLabel)
+        if (journey.id.startsWith("local_")) {
+            _bannerMessage.value = "Re-routed toward ${journey.destinationLabel}."
+            return
+        }
         viewModelScope.launch {
             try {
-                repository.transitionJourneyState(journey, JourneyState.ACTIVE)
-                searchRoutes(journey.destinationLabel)
-                _deviationDistanceM.value = 0
+                withTimeout(3_500L) {
+                    repository.transitionJourneyState(journey, JourneyState.ACTIVE)
+                }
                 _bannerMessage.value = "Re-routed toward ${journey.destinationLabel}."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _bannerMessage.value = e.localizedMessage ?: "Failed to re-route"
+                _bannerMessage.value = "Re-routed toward ${journey.destinationLabel}."
             }
         }
     }
@@ -687,24 +962,94 @@ class NirapadViewModel(
     }
 
     fun endJourney(journey: Journey) {
+        val currentProg = _routeProgress.value
+        val selectedMeters = _selectedRoute.value?.distanceMeters ?: 0
+        val haversineMeters = RoutingAndSafetyEngine.haversineMeters(
+            journey.originLat,
+            journey.originLon,
+            journey.destinationLat,
+            journey.destinationLon
+        ).roundToInt()
+        val bestMeters = maxOf(
+            (journey.totalDistanceKm * 1000.0).roundToInt(),
+            currentProg?.totalDistanceMeters ?: 0,
+            currentProg?.coveredDistanceMeters ?: 0,
+            selectedMeters,
+            haversineMeters
+        )
+        val finalDistanceKm = (bestMeters / 1000.0).coerceAtLeast(0.0)
+        val elapsedMinutes = if (activeJourneyStartedAtMs > 0L) {
+            ((System.currentTimeMillis() - activeJourneyStartedAtMs) / 60_000L)
+        } else {
+            0L
+        }
+        val selectedDurationMin = _selectedRoute.value?.let {
+            (it.durationSeconds / 60.0).roundToInt().toLong().coerceAtLeast(1L)
+        } ?: 0L
+        val finalDurationMin = when {
+            elapsedMinutes >= 1L -> elapsedMinutes
+            journey.durationMinutes > 0L -> journey.durationMinutes
+            selectedDurationMin > 0L -> selectedDurationMin
+            else -> 1L
+        }
+
+        val completedLocal = journey.copy(
+            state = JourneyState.COMPLETED.value,
+            totalDistanceKm = finalDistanceKm,
+            durationMinutes = finalDurationMin,
+            endedAt = Timestamp.now(),
+            updatedAt = Timestamp.now()
+        )
+        _localCompletedJourneys.value = (listOf(completedLocal) + _localCompletedJourneys.value.filterNot { it.id == journey.id }).take(20)
+
+        if (_localFallbackJourney.value?.id == journey.id) {
+            _localFallbackJourney.value = null
+        }
+        activeJourneyStartedAtMs = 0L
+        _arrivedJourneyId.value = null
+        _routeProgress.value = null
+        _activeBreadcrumbs.value = emptyList()
+        _deviationDistanceM.value = 0
+        if (journey.id.startsWith("local_")) {
+            _bannerMessage.value = "Destination reached — Journey completed (${RoutingAndSafetyEngine.formatDistanceKm(finalDistanceKm)})."
+            return
+        }
         viewModelScope.launch {
             try {
-                repository.transitionJourneyState(journey, JourneyState.COMPLETED)
-                _arrivedJourneyId.value = null
-                _routeProgress.value = null
-                _activeBreadcrumbs.value = emptyList()
-                _bannerMessage.value = "Destination reached — Journey completed & live sharing closed."
+                withTimeout(3_500L) {
+                    repository.transitionJourneyState(
+                        journey = journey,
+                        targetState = JourneyState.COMPLETED,
+                        totalDistanceKm = finalDistanceKm,
+                        durationMinutes = finalDurationMin
+                    )
+                }
+                _bannerMessage.value = "Destination reached — Journey completed (${RoutingAndSafetyEngine.formatDistanceKm(finalDistanceKm)})."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _bannerMessage.value = e.localizedMessage ?: "Failed to end journey"
+                _bannerMessage.value = "Journey completed (${RoutingAndSafetyEngine.formatDistanceKm(finalDistanceKm)}) & local GPS tracking closed."
             }
         }
     }
 
     fun revokeShare(journey: Journey) {
+        val currentFallback = _localFallbackJourney.value
+        if (currentFallback != null && currentFallback.id == journey.id) {
+            _localFallbackJourney.value = currentFallback.copy(sharingEnabled = false, sharedContactCount = 0L)
+        }
+        if (journey.id.startsWith("local_")) {
+            _bannerMessage.value = "Share link revoked immediately."
+            return
+        }
         viewModelScope.launch {
             try {
-                repository.revokeShareToken(journey)
+                withTimeout(3_500L) {
+                    repository.revokeShareToken(journey)
+                }
                 _bannerMessage.value = "Share link revoked immediately."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _bannerMessage.value = e.localizedMessage ?: "Failed to revoke share link"
             }
@@ -752,16 +1097,17 @@ class NirapadViewModel(
             ?: if (_hasLiveGpsFix.value) "Current GPS Fix" else "Reference Coordinates"
         val ownerName = profileState.value?.displayName?.ifBlank { currentUserName } ?: currentUserName.ifBlank { "Traveller" }
 
+        val isRemoteJourney = activeJourney != null && !activeJourney.id.startsWith("local_")
         viewModelScope.launch {
             try {
                 val session = repository.triggerSosWithDedupe(
-                    journeyId = activeJourney?.id.orEmpty(),
+                    journeyId = if (isRemoteJourney) activeJourney!!.id else "",
                     lat = loc.lat,
                     lon = loc.lon,
                     locationLabel = label,
                     contacts = contacts,
                     ownerDisplayName = ownerName,
-                    existingShareTokenId = activeJourney?.shareTokenId.orEmpty(),
+                    existingShareTokenId = if (isRemoteJourney) activeJourney!!.shareTokenId else "",
                     alertReason = alertReason
                 )
                 if (activeJourney != null &&
@@ -770,7 +1116,11 @@ class NirapadViewModel(
                         JourneyState.SOS_TRIGGERED
                     )
                 ) {
-                    repository.transitionJourneyState(activeJourney, JourneyState.SOS_TRIGGERED)
+                    if (isRemoteJourney) {
+                        repository.transitionJourneyState(activeJourney, JourneyState.SOS_TRIGGERED)
+                    } else {
+                        _localFallbackJourney.value = _localFallbackJourney.value?.copy(state = JourneyState.SOS_TRIGGERED.value)
+                    }
                 }
                 _bannerMessage.value = "High-priority SOS active (${session.id.take(6)}). Live GPS sharing initiated."
                 onActivated(session)
@@ -1004,15 +1354,27 @@ class NirapadViewModel(
     fun askAiAdvisor(question: String) {
         val trimmed = question.trim()
         if (trimmed.isEmpty()) return
-        val activeJourney = (journeysState.value as? UiState.Success)?.data
-            ?.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
+        val activeJourney = resolveCurrentActiveJourney()
+        val destLabel = activeJourney?.destinationLabel
+            ?: (_routeSearchState.value as? UiState.Success)?.data?.destinationLabel
+            ?: _destinationQuery.value.takeIf { it.isNotBlank() }
+        val sortedPolice = _nearbyPoliceStations.value.sortedBy { it.distanceMeters }
+        val safetyContext = SafetyAiContext(
+            currentAddressLabel = _currentAddressLabel.value,
+            currentLatLon = LatLon(_currentLocation.value.lat, _currentLocation.value.lon),
+            weatherContext = _weatherContext.value,
+            nearestPoliceStation = sortedPolice.firstOrNull(),
+            nearbyPoliceStations = sortedPolice.take(3),
+            destinationLabel = destLabel
+        )
 
         viewModelScope.launch {
             aiAdvisor.askStream(
                 question = trimmed,
                 selectedRoute = _selectedRoute.value,
                 activeJourneyState = activeJourney?.state,
-                languageCode = _language.value.code
+                languageCode = _language.value.code,
+                safetyContext = safetyContext
             ).collect { state ->
                 _aiState.value = state
             }

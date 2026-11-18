@@ -38,6 +38,29 @@ data class DestinationPreset(
 object RoutingAndSafetyEngine {
     const val DESTINATION_ARRIVAL_THRESHOLD_METERS = 35.0
 
+    fun formatDistanceMeters(meters: Int): String {
+        val safeMeters = meters.coerceAtLeast(0)
+        return if (safeMeters >= 1000) {
+            String.format(Locale.US, "%.1f km", safeMeters / 1000.0)
+        } else {
+            "$safeMeters m"
+        }
+    }
+
+    fun formatDistanceKm(km: Double): String {
+        val safeKm = km.coerceAtLeast(0.0)
+        return if (safeKm >= 1.0) {
+            String.format(Locale.US, "%.1f km", safeKm)
+        } else {
+            "${(safeKm * 1000.0).roundToInt().coerceAtLeast(0)} m"
+        }
+    }
+
+    fun formatDurationMinutes(seconds: Int): String {
+        val mins = (seconds / 60.0).roundToInt().coerceAtLeast(1)
+        return "$mins min"
+    }
+
     val defaultApiClient: FreeSafetyApisClient by lazy { FreeSafetyApisClient() }
 
     // Authoritative national helplines (never fabricated local street numbers)
@@ -564,14 +587,35 @@ object RoutingAndSafetyEngine {
         currentLocation: LatLon,
         route: RouteOption?,
         destination: LatLon,
-        arrivalThresholdMeters: Double = DESTINATION_ARRIVAL_THRESHOLD_METERS
+        arrivalThresholdMeters: Double = DESTINATION_ARRIVAL_THRESHOLD_METERS,
+        origin: LatLon? = null,
+        speedKmh: Double? = null
     ): RouteProgress {
         val distToDest = haversineMeters(currentLocation.lat, currentLocation.lon, destination.lat, destination.lon)
         val hasArrived = distToDest <= arrivalThresholdMeters
+        val validSpeedKmh = speedKmh?.takeIf { it.isFinite() && it >= 0.0 }
         val geom = route?.geometry.orEmpty()
         if (geom.size < 2) {
             val remDist = distToDest.roundToInt().coerceAtLeast(0)
-            val remDur = ((remDist / 6.5).roundToInt()).coerceAtLeast(if (remDist == 0) 0 else 30)
+            val baselineOriginMeters = origin?.let {
+                haversineMeters(it.lat, it.lon, destination.lat, destination.lon).roundToInt()
+            } ?: 0
+            val totalDistMeters = maxOf(route?.distanceMeters ?: 0, baselineOriginMeters, remDist)
+            val coveredMeters = if (hasArrived) {
+                totalDistMeters
+            } else {
+                (totalDistMeters - remDist).coerceIn(0, totalDistMeters)
+            }
+            val progressFrac = when {
+                hasArrived -> 1f
+                totalDistMeters > 0 -> (coveredMeters.toFloat() / totalDistMeters.toFloat()).coerceIn(0f, 1f)
+                else -> 0f
+            }
+            val remDur = if (hasArrived || remDist <= 15) {
+                0
+            } else {
+                ((remDist / 6.5).roundToInt()).coerceAtLeast(30)
+            }
             return RouteProgress(
                 remainingPolyline = listOf(currentLocation, destination),
                 remainingDistanceMeters = remDist,
@@ -579,7 +623,11 @@ object RoutingAndSafetyEngine {
                 distanceToDestinationMeters = distToDest,
                 activeStep = route?.steps?.firstOrNull(),
                 distanceToNextStepMeters = remDist,
-                hasArrived = hasArrived
+                hasArrived = hasArrived,
+                totalDistanceMeters = totalDistMeters,
+                coveredDistanceMeters = coveredMeters,
+                progressFraction = progressFrac,
+                speedKmh = validSpeedKmh
             )
         }
 
@@ -612,6 +660,17 @@ object RoutingAndSafetyEngine {
         }
         val roundedRemDist = remDistMeters.roundToInt().coerceAtLeast(0)
         val totalRouteDist = max(route?.distanceMeters ?: roundedRemDist, 1)
+        val effectiveTotalDist = max(totalRouteDist, roundedRemDist)
+        val coveredMeters = if (hasArrived) {
+            effectiveTotalDist
+        } else {
+            (effectiveTotalDist - roundedRemDist).coerceIn(0, effectiveTotalDist)
+        }
+        val progressFrac = when {
+            hasArrived -> 1f
+            effectiveTotalDist > 0 -> (coveredMeters.toFloat() / effectiveTotalDist.toFloat()).coerceIn(0f, 1f)
+            else -> 0f
+        }
         val totalRouteDur = route?.durationSeconds ?: (totalRouteDist / 6)
         val remDurSec = if (hasArrived || roundedRemDist <= 15) {
             0
@@ -646,7 +705,11 @@ object RoutingAndSafetyEngine {
             distanceToDestinationMeters = distToDest,
             activeStep = chosenStep,
             distanceToNextStepMeters = distToNextStep,
-            hasArrived = hasArrived
+            hasArrived = hasArrived,
+            totalDistanceMeters = effectiveTotalDist,
+            coveredDistanceMeters = coveredMeters,
+            progressFraction = progressFrac,
+            speedKmh = validSpeedKmh
         )
     }
 

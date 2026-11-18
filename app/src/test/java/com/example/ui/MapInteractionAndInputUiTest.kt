@@ -28,10 +28,12 @@ import com.example.data.model.LatLon
 import com.example.data.service.LocationReading
 import com.example.localization.AppLang
 import com.example.localization.NirapadStrings
+import com.example.ui.components.EsriWorldImageryTileSource
 import com.example.ui.components.NirapadInputDefaults
 import com.example.ui.components.NirapadMapCanvas
 import com.example.ui.components.NirapadOutlinedTextField
 import com.example.ui.components.ensureOsmDroidConfigured
+import com.example.ui.components.esriWorldImageryTileUrl
 import com.example.ui.screens.EmergencyScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.JourneyScreen
@@ -44,6 +46,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.osmdroid.config.Configuration
+import org.osmdroid.util.MapTileIndex
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -86,6 +89,64 @@ class MapInteractionAndInputUiTest {
         assertTrue(cfg.osmdroidBasePath.absolutePath.startsWith(context.cacheDir.absolutePath))
         assertTrue(cfg.osmdroidTileCache.absolutePath.startsWith(context.cacheDir.absolutePath))
         assertTrue(cfg.userAgentValue.isNotBlank())
+    }
+
+    @Test
+    fun esriWorldImageryTileSource_formatsArcGisZoomYXUrlCorrectly() {
+        val expectedUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/15/13654/24123"
+        assertEquals(expectedUrl, esriWorldImageryTileUrl(zoom = 15, x = 24123, y = 13654))
+
+        val tileIndex = MapTileIndex.getTileIndex(15, 24123, 13654)
+        assertEquals(expectedUrl, EsriWorldImageryTileSource.getTileURLString(tileIndex))
+    }
+
+    @Test
+    fun mapCanvas_layerToggleSwitchesBetweenStreetAndSatelliteInInlineAndFullscreen() {
+        val loc = LatLon(25.5941, 85.1376)
+
+        composeRule.setContent {
+            NirapadTheme(darkTheme = false) {
+                NirapadMapCanvas(
+                    currentLocation = loc,
+                    routes = emptyList(),
+                    selectedRouteId = null,
+                    breadcrumbs = emptyList(),
+                    facilities = emptyList(),
+                    isDeviated = false,
+                    hasLiveGpsFix = true,
+                    autoFollowByDefault = true,
+                    fullscreenTitle = "Patna Explorer",
+                    modifier = Modifier.height(220.dp)
+                )
+            }
+        }
+
+        // Starts in Street View -> toggle reads "Satellite" and badge reflects street/offline mode
+        composeRule.onNodeWithTag("map_layer_toggle_button").assertIsDisplayed()
+        composeRule.onNodeWithText("Satellite").assertIsDisplayed()
+        composeRule.onNodeWithTag("map_cache_status_badge").assertIsDisplayed()
+
+        // Tap toggle on inline map -> switches to Esri Satellite View ("Street" toggle + "© Esri" attribution + "Satellite • Esri")
+        composeRule.onNodeWithTag("map_layer_toggle_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Street").assertIsDisplayed()
+        composeRule.onNodeWithText("© Esri").assertIsDisplayed()
+        composeRule.onNodeWithText("Satellite • Esri").assertIsDisplayed()
+
+        // Expand fullscreen -> stays in Satellite mode and exposes fullscreen_map_layer_toggle_button
+        composeRule.onNodeWithTag("map_expand_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("fullscreen_map_layer_toggle_button").assertIsDisplayed()
+        composeRule.onNodeWithText("© Esri World Imagery", substring = true).assertIsDisplayed()
+
+        // Toggle back to Street inside fullscreen -> syncs state when minimized
+        composeRule.onNodeWithTag("fullscreen_map_layer_toggle_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("© OpenStreetMap", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("map_minimize_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Satellite").assertIsDisplayed()
     }
 
     @Test

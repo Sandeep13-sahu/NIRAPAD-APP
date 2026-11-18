@@ -104,6 +104,91 @@ class RealWorldNavigationUiTest {
     }
 
     @Test
+    fun homeScreen_startJourneyButtonTriggersDirectJourneyLaunch() {
+        var launchedWithOverride: String? = "UNSET"
+        var clickCount = 0
+
+        composeRule.setContent {
+            NirapadTheme(darkTheme = false) {
+                HomeScreen(
+                    copy = NirapadStrings.get(AppLang.EN),
+                    currentLocation = LocationReading(25.5941, 85.1376, 12.0, 1_700_000_000_000L),
+                    hasLiveGpsFix = true,
+                    locationPermissionGranted = true,
+                    destinationQuery = "Patna Junction",
+                    routes = emptyList(),
+                    selectedRoute = null,
+                    activeJourney = null,
+                    facilities = emptyList(),
+                    onRequestLocationPermission = {},
+                    onDestinationQueryChange = {},
+                    onSearchRoutes = {},
+                    onStartJourney = { override ->
+                        launchedWithOverride = override
+                        clickCount++
+                    },
+                    onOpenJourney = {},
+                    onOpenEmergencyDirectory = {},
+                    onOpenAiAdvisor = {},
+                    onRequestSosConfirm = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("home_compare_routes_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_start_journey_button").assertIsDisplayed().performClick()
+        assertEquals(1, clickCount)
+        assertEquals(null, launchedWithOverride)
+    }
+
+    @Test
+    fun homeScreen_displaysSelectedRouteDistanceAndEtaPreviewCard() {
+        val route = RouteOption(
+            id = "osrm_home",
+            label = "Fraser Road Lit Corridor",
+            summary = "Well-lit avenue",
+            distanceMeters = 4200,
+            durationSeconds = 720,
+            providerName = "OSRM",
+            providerIsFallback = false,
+            safetyTier = SafetyTier.HIGHER_CONTEXT,
+            safetyLabel = "High Crowd & Well-Lit",
+            dataCoveragePercent = 95,
+            freshnessNote = "Live",
+            caveat = "",
+            factors = emptyList(),
+            geometry = listOf(LatLon(25.5941, 85.1376), LatLon(25.6039, 85.1376))
+        )
+
+        composeRule.setContent {
+            NirapadTheme(darkTheme = false) {
+                HomeScreen(
+                    copy = NirapadStrings.get(AppLang.EN),
+                    currentLocation = LocationReading(25.5941, 85.1376, 12.0, 1_700_000_000_000L),
+                    hasLiveGpsFix = true,
+                    locationPermissionGranted = true,
+                    destinationQuery = "Patna Junction",
+                    routes = listOf(route),
+                    selectedRoute = route,
+                    activeJourney = null,
+                    facilities = emptyList(),
+                    onRequestLocationPermission = {},
+                    onDestinationQueryChange = {},
+                    onSearchRoutes = {},
+                    onOpenJourney = {},
+                    onOpenEmergencyDirectory = {},
+                    onOpenAiAdvisor = {},
+                    onRequestSosConfirm = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("home_route_preview_card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("4.2 km", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("ETA 12 min", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun planRouteScreen_displaysAfterDarkWarningCrowdTierAndStepPreviews() {
         val route = RouteOption(
             id = "osrm_0",
@@ -169,6 +254,8 @@ class RealWorldNavigationUiTest {
 
         composeRule.onNodeWithTag("plan_weather_warning_banner").assertIsDisplayed()
         composeRule.onNodeWithTag("route_card_osrm_0").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("route_distance_eta_osrm_0", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("1.9 km • 4 min", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("route_crowd_tier_osrm_0", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Overpass corridor signals: 14 active POIs • 6 lit tags • 2 police", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("Explain safety factors", useUnmergedTree = true).performClick()
@@ -194,7 +281,18 @@ class RealWorldNavigationUiTest {
             sharedContactCount = 2L,
             shareTokenId = "tok_test_9876543210",
             lastLat = 25.6038,
-            lastLon = 85.1376
+            lastLon = 85.1376,
+            totalDistanceKm = 4.2,
+            durationMinutes = 14L
+        )
+        val completedHistory = Journey(
+            id = "hist_1",
+            destinationLabel = "Gandhi Maidan",
+            selectedRouteLabel = "Fraser Road",
+            providerName = "OSRM",
+            state = JourneyState.COMPLETED.value,
+            totalDistanceKm = 4.2,
+            durationMinutes = 14L
         )
         val progress = RouteProgress(
             remainingPolyline = listOf(LatLon(25.6038, 85.1376), LatLon(25.6039, 85.1376)),
@@ -211,7 +309,11 @@ class RealWorldNavigationUiTest {
                 location = LatLon(25.6039, 85.1376)
             ),
             distanceToNextStepMeters = 18,
-            hasArrived = true
+            hasArrived = true,
+            totalDistanceMeters = 4200,
+            coveredDistanceMeters = 4200,
+            progressFraction = 1f,
+            speedKmh = 24.0
         )
 
         composeRule.setContent {
@@ -220,7 +322,7 @@ class RealWorldNavigationUiTest {
                     copy = NirapadStrings.get(AppLang.EN),
                     currentLocation = LocationReading(25.6038, 85.1376, 10.0, 1_700_000_000_000L),
                     activeJourney = journey,
-                    journeysHistory = emptyList(),
+                    journeysHistory = listOf(completedHistory),
                     selectedRoute = null,
                     breadcrumbs = emptyList(),
                     deviationDistanceM = 4,
@@ -241,17 +343,28 @@ class RealWorldNavigationUiTest {
             }
         }
 
-        // Destination Reached Modal appears when arrivedJourneyId matches
+        // Destination Reached Modal appears with persisted Total Distance summary
         composeRule.onNodeWithTag("destination_reached_modal").assertIsDisplayed()
         composeRule.onNodeWithText("Destination Reached — Journey Succeeded!").assertIsDisplayed()
+        composeRule.onNodeWithTag("modal_total_distance_summary", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Total Distance: 4.2 km • 14 min", useUnmergedTree = true).assertIsDisplayed()
 
         // Complete & Close Journey button triggers onEndJourney
         composeRule.onNodeWithTag("complete_close_journey_button").performClick()
         assertTrue(endedJourney)
 
-        // Dismiss dialog or check underlying Turn-by-Turn & WhatsApp share exist
+        // Dismiss dialog and verify Trip Metrics Row, Progress Bar, WhatsApp share & Recent Journeys distance
         composeRule.onNodeWithTag("dismiss_arrival_button").performClick()
         composeRule.onNodeWithTag("turn_by_turn_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("journey_trip_metrics_row").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("metric_remaining_distance", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("metric_covered_distance", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("metric_eta_speed", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("journey_progress_bar").performScrollTo().assertIsDisplayed()
+
+        composeRule.onNodeWithTag("recent_journey_card_hist_1").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("4.2 km • COMPLETED", useUnmergedTree = true).assertIsDisplayed()
+
         composeRule.onNodeWithTag("share_whatsapp_button").performScrollTo().performClick()
 
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()

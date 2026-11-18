@@ -24,6 +24,7 @@ import com.example.data.repository.AiAdvisorUiState
 import com.example.data.service.LocationReading
 import com.example.localization.AppLang
 import com.example.localization.NirapadStrings
+import com.example.ui.components.AiAdvisorModal
 import com.example.ui.screens.AdvisoryAiNavigationScreen
 import com.example.ui.theme.NirapadTheme
 import org.junit.Assert.assertEquals
@@ -245,5 +246,37 @@ class AdvisoryAiNavigationUiTest {
         composeRule.mainClock.advanceTimeBy(150)
 
         assertEquals(true, retried)
+    }
+
+    @Test
+    fun aiAdvisorModal_rendersQuickPromptChipsLiveContextAndResponseCard() {
+        val copy = NirapadStrings.get(AppLang.EN)
+        val asked = mutableListOf<String>()
+        var aiState by mutableStateOf<AiAdvisorUiState>(AiAdvisorUiState.Idle)
+
+        composeRule.setContent {
+            NirapadTheme(darkTheme = false) {
+                AiAdvisorModal(
+                    copy = copy,
+                    aiState = aiState,
+                    safetyContextSummary = "Location: Kankarbagh, Patna • Night (23°C) • Police: Kotwali Police Station (1.2 km)",
+                    onAsk = { q ->
+                        asked.add(q)
+                        aiState = AiAdvisorUiState.Success("Stay along Station Road corridor; Kotwali Police Station is 1.2 km away.")
+                    },
+                    onDismiss = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ai_live_context_banner").assertIsDisplayed()
+        composeRule.onNodeWithText("Is my current route safe right now?").assertIsDisplayed()
+        composeRule.onNodeWithText("Nearest police & safe spots").assertIsDisplayed()
+        composeRule.onNodeWithText("Night travel safety tips").assertIsDisplayed()
+        composeRule.onNodeWithText("What to do if followed?").assertIsDisplayed().performClick()
+
+        composeRule.waitForIdle()
+        assertEquals(listOf("What to do if followed?"), asked)
+        composeRule.onNodeWithTag("ai_advisor_response_card").assertIsDisplayed()
     }
 }

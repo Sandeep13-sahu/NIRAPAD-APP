@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -96,6 +98,7 @@ private val TRAVEL_WINDOWS = listOf(
     "Late Night" to "advisory_window_night"
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdvisoryAiNavigationScreen(
     copy: NirapadCopy,
@@ -582,14 +585,15 @@ fun AdvisoryAiNavigationScreen(
                         color = NirapadNavyDark
                     )
 
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf(
-                            "Which route has better street lighting?",
-                            "Where is public traffic busiest right now?",
-                            "What precautions help on lower-lit segments?"
+                            "Is my current route safe right now?",
+                            "Nearest police & safe spots",
+                            "Night travel safety tips",
+                            "What to do if followed?"
                         ).forEach { prompt ->
                             AssistChip(
                                 onClick = {
@@ -608,6 +612,7 @@ fun AdvisoryAiNavigationScreen(
                                     Text(
                                         text = prompt,
                                         style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Medium,
                                         color = Color(0xFF0F172A)
                                     )
                                 }
@@ -623,7 +628,7 @@ fun AdvisoryAiNavigationScreen(
                         NirapadOutlinedTextField(
                             value = followUpQuestion,
                             onValueChange = { followUpQuestion = it },
-                            placeholder = { Text("Ask about lighting, crowd, or checkpoints...") },
+                            placeholder = { Text("Ask in English or हिन्दी about safety...") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier

@@ -80,6 +80,8 @@ service cloud.firestore {
              (!('lastLocationAt' in data) || data.lastLocationAt == null || (data.lastLocationAt is timestamp && data.lastLocationAt <= request.time)) &&
              (!('startedAt' in data) || data.startedAt == null || (data.startedAt is timestamp && data.startedAt <= request.time)) &&
              (!('endedAt' in data) || data.endedAt == null || (data.endedAt is timestamp && data.endedAt <= request.time)) &&
+             (!('totalDistanceKm' in data) || data.totalDistanceKm == null || (data.totalDistanceKm is number && data.totalDistanceKm >= 0 && data.totalDistanceKm <= 50000)) &&
+             (!('durationMinutes' in data) || data.durationMinutes == null || (data.durationMinutes is int && data.durationMinutes >= 0 && data.durationMinutes <= 10080)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -222,7 +224,7 @@ service cloud.firestore {
                        incoming().userId == request.auth.uid &&
                        incoming().state in ['PLANNED', 'ACTIVE'] &&
                        incoming().keys().hasAll(['userId', 'ownerDisplayName', 'originLabel', 'originLat', 'originLon', 'destinationLabel', 'destinationLat', 'destinationLon', 'selectedRouteId', 'selectedRouteLabel', 'providerName', 'state', 'deviationThresholdMeters', 'sharingEnabled', 'sharedContactCount', 'shareTokenId', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['userId', 'ownerDisplayName', 'originLabel', 'originLat', 'originLon', 'destinationLabel', 'destinationLat', 'destinationLon', 'selectedRouteId', 'selectedRouteLabel', 'providerName', 'state', 'deviationThresholdMeters', 'sharingEnabled', 'sharedContactCount', 'shareTokenId', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'lastLocationAt', 'startedAt', 'endedAt', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'ownerDisplayName', 'originLabel', 'originLat', 'originLon', 'destinationLabel', 'destinationLat', 'destinationLon', 'selectedRouteId', 'selectedRouteLabel', 'providerName', 'state', 'deviationThresholdMeters', 'sharingEnabled', 'sharedContactCount', 'shareTokenId', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'lastLocationAt', 'startedAt', 'endedAt', 'totalDistanceKm', 'durationMinutes', 'createdAt', 'updatedAt']) &&
                        isValidJourney(incoming());
 
       allow update: if isSignedIn() &&
@@ -233,9 +235,10 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        !(existing().state in ['COMPLETED', 'CANCELLED']) &&
                        (
-                         (incoming().diff(existing()).affectedKeys().hasOnly(['state', 'startedAt', 'endedAt', 'updatedAt'])) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['state', 'startedAt', 'endedAt', 'totalDistanceKm', 'durationMinutes', 'updatedAt'])) ||
                          (incoming().diff(existing()).affectedKeys().hasOnly(['state', 'lastLat', 'lastLon', 'lastAccuracyMeters', 'lastLocationAt', 'updatedAt'])) ||
-                         (incoming().diff(existing()).affectedKeys().hasOnly(['sharingEnabled', 'sharedContactCount', 'shareTokenId', 'updatedAt']))
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['sharingEnabled', 'sharedContactCount', 'shareTokenId', 'updatedAt'])) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['selectedRouteId', 'selectedRouteLabel', 'providerName', 'totalDistanceKm', 'durationMinutes', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(journeyId) && existing().userId == request.auth.uid;

@@ -150,6 +150,8 @@ test("Journeys: state machine, query alignment, cross-user isolation, and termin
     lastLat: 28.6315,
     lastLon: 77.2167,
     lastAccuracyMeters: 12.0,
+    totalDistanceKm: 12.4,
+    durationMinutes: 28,
     lastLocationAt: tsNow(),
     startedAt: tsNow(),
     createdAt: tsNow(),
@@ -174,10 +176,12 @@ test("Journeys: state machine, query alignment, cross-user isolation, and termin
     })
   );
 
-  // Transition to terminal state COMPLETED
+  // Transition to terminal state COMPLETED with persisted distance/duration
   await assertSucceeds(
     aliceDb.collection("journeys").doc("j1").update({
       state: "COMPLETED",
+      totalDistanceKm: 12.6,
+      durationMinutes: 26,
       endedAt: tsNow(),
       updatedAt: tsNow(),
     })

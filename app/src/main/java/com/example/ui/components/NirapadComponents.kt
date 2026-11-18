@@ -864,7 +864,8 @@ fun AiAdvisorModal(
     copy: NirapadCopy,
     aiState: AiAdvisorUiState,
     onAsk: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    safetyContextSummary: String? = null
 ) {
     var question by remember { mutableStateOf("") }
 
@@ -884,7 +885,7 @@ fun AiAdvisorModal(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = NirapadPrimaryTeal)
-                    Text(copy.aiAdvisorTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(copy.aiAdvisorTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = "Close AI advisor")
@@ -904,14 +905,32 @@ fun AiAdvisorModal(
                 )
             }
 
+            if (!safetyContextSummary.isNullOrBlank()) {
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                    modifier = Modifier.fillMaxWidth().testTag("ai_live_context_banner")
+                ) {
+                    Text(
+                        text = safetyContextSummary,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0F172A),
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
-                    "Explain why this route was scored this way",
-                    "What precautions help when safety data is limited?",
-                    "What should I do if I notice a route deviation?"
+                    "Is my current route safe right now?",
+                    "Nearest police & safe spots",
+                    "Night travel safety tips",
+                    "What to do if followed?"
                 ).forEach { prompt ->
                     AssistChip(
                         onClick = {
@@ -930,6 +949,7 @@ fun AiAdvisorModal(
                             Text(
                                 text = prompt,
                                 style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
                                 color = Color(0xFF0F172A)
                             )
                         }
@@ -945,7 +965,7 @@ fun AiAdvisorModal(
                 NirapadOutlinedTextField(
                     value = question,
                     onValueChange = { question = it },
-                    placeholder = { Text("Ask about route context or journey tips...") },
+                    placeholder = { Text("Ask in English or हिन्दी about safety...") },
                     singleLine = true,
                     modifier = Modifier.weight(1f).testTag("ai_question_input")
                 )
@@ -964,25 +984,27 @@ fun AiAdvisorModal(
             when (aiState) {
                 AiAdvisorUiState.Idle -> {
                     Text(
-                        text = "Select a prompt above or ask a question about your route factors.",
+                        text = "Tap a quick prompt above or ask any route & safety question in English or हिन्दी.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = NirapadTextSecondary
                     )
                 }
                 AiAdvisorUiState.Loading -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Generating advisory explanation...", style = MaterialTheme.typography.bodyMedium)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = NirapadPrimaryTeal)
+                        Text("Checking live safety context...", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF0F172A))
                     }
                 }
                 is AiAdvisorUiState.Streaming -> {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.dp, NirapadBorderSubtle)
+                        border = BorderStroke(1.dp, NirapadBorderSubtle),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = aiState.text,
                             style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF0F172A),
                             modifier = Modifier.padding(14.dp)
                         )
                     }
@@ -990,11 +1012,12 @@ fun AiAdvisorModal(
                 is AiAdvisorUiState.Success -> {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = BorderStroke(1.dp, NirapadBorderSubtle)
+                        border = BorderStroke(1.dp, NirapadPrimaryTeal.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth().testTag("ai_advisor_response_card")
                     ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Advisory Response", style = MaterialTheme.typography.labelMedium, color = NirapadPrimaryTeal, fontWeight = FontWeight.Bold)
-                            Text(text = aiState.text, style = MaterialTheme.typography.bodyMedium)
+                            Text("NIRAPAD Safety Guidance", style = MaterialTheme.typography.labelMedium, color = NirapadPrimaryTeal, fontWeight = FontWeight.Bold)
+                            Text(text = aiState.text, style = MaterialTheme.typography.bodyMedium, color = Color(0xFF0F172A))
                         }
                     }
                 }

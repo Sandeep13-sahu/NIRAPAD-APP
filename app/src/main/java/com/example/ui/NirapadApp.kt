@@ -290,7 +290,8 @@ private fun AuthenticatedNirapadShell(
 
     val contacts = (contactsState as? UiState.Success)?.data ?: emptyList()
     val journeys = (journeysState as? UiState.Success)?.data ?: emptyList()
-    val activeJourney = journeys.firstOrNull { !JourneyState.fromValue(it.state).isTerminal }
+    val activeJourney by viewModel.activeJourneyState.collectAsStateWithLifecycle()
+    val journeysHistory by viewModel.journeysHistoryState.collectAsStateWithLifecycle()
     val sosSessions = (sosState as? UiState.Success)?.data ?: emptyList()
     val activeSos = sosSessions.firstOrNull { it.status == "ACTIVE" }
     val routes = (routeSearchState as? UiState.Success)?.data?.routes ?: emptyList()
@@ -627,7 +628,22 @@ private fun AuthenticatedNirapadShell(
                                 isSearchingPlaces = isSearchingPlaces,
                                 onSelectPlaceSuggestion = viewModel::selectPlaceSuggestion,
                                 onDismissSuggestions = viewModel::dismissPlaceSuggestions,
-                                nearbyPoliceStations = nearbyPoliceStations
+                                nearbyPoliceStations = nearbyPoliceStations,
+                                onStartJourney = { presetOrQuery ->
+                                    val shareCount = if (contacts.isNotEmpty()) {
+                                        contacts.count { it.notifyOnStart }.toLong().coerceAtLeast(1L)
+                                    } else {
+                                        0L
+                                    }
+                                    viewModel.startJourney(
+                                        sharingEnabled = contacts.isNotEmpty(),
+                                        selectedContactCount = shareCount,
+                                        shareDurationMinutes = 60L,
+                                        destinationOverride = presetOrQuery
+                                    )
+                                    navigateTab(NirapadRoutes.JOURNEY)
+                                },
+                                routeProgress = routeProgress
                             )
                         }
 
@@ -700,7 +716,7 @@ private fun AuthenticatedNirapadShell(
                                 hasLiveGpsFix = hasLiveGpsFix,
                                 locationPermissionGranted = locationPermissionGranted,
                                 activeJourney = activeJourney,
-                                journeysHistory = journeys.filter { JourneyState.fromValue(it.state).isTerminal },
+                                journeysHistory = journeysHistory,
                                 selectedRoute = selectedRoute,
                                 breadcrumbs = breadcrumbs,
                                 deviationDistanceM = deviationDistanceM,
@@ -914,11 +930,24 @@ private fun AuthenticatedNirapadShell(
     }
 
     if (showAiAdvisor) {
+        val nearestPolice = nearbyPoliceStations.minByOrNull { it.distanceMeters }
+        val contextSummary = buildList {
+            currentAddressLabel?.takeIf { it.isNotBlank() }?.let { add(it) }
+            weatherContext?.let { w ->
+                val period = if (w.isDay) "Day" else "Night"
+                add("${w.temperatureCelsius.toInt()}°C $period")
+            }
+            nearestPolice?.let { st ->
+                add("Police: ${st.name} (${String.format(java.util.Locale.US, "%.1f km", st.distanceMeters / 1000.0)})")
+            }
+        }.joinToString(" • ").takeIf { it.isNotBlank() }
+
         AiAdvisorModal(
             copy = copy,
             aiState = aiState,
             onAsk = viewModel::askAiAdvisor,
-            onDismiss = { showAiAdvisor = false }
+            onDismiss = { showAiAdvisor = false },
+            safetyContextSummary = contextSummary
         )
     }
 }

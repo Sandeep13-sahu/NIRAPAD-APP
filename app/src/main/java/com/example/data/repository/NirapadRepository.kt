@@ -230,7 +230,9 @@ class NirapadRepository(
         deviationThresholdMeters: Long,
         sharingEnabled: Boolean,
         sharedContactCount: Long,
-        shareDurationMinutes: Long
+        shareDurationMinutes: Long,
+        totalDistanceKm: Double = 0.0,
+        durationMinutes: Long = 0L
     ): Pair<String, String> {
         val uid = requireUserId()
         val journeyRef = db.collection("journeys").document()
@@ -257,6 +259,8 @@ class NirapadRepository(
                 "lastLat" to originLat.coerceIn(-90.0, 90.0),
                 "lastLon" to originLon.coerceIn(-180.0, 180.0),
                 "lastAccuracyMeters" to 15.0,
+                "totalDistanceKm" to totalDistanceKm.coerceIn(0.0, 50_000.0),
+                "durationMinutes" to durationMinutes.coerceIn(0L, 10_080L),
                 "lastLocationAt" to FieldValue.serverTimestamp(),
                 "startedAt" to FieldValue.serverTimestamp(),
                 "createdAt" to FieldValue.serverTimestamp(),
@@ -372,7 +376,12 @@ class NirapadRepository(
         }
     }
 
-    suspend fun transitionJourneyState(journey: Journey, targetState: JourneyState) {
+    suspend fun transitionJourneyState(
+        journey: Journey,
+        targetState: JourneyState,
+        totalDistanceKm: Double? = null,
+        durationMinutes: Long? = null
+    ) {
         val uid = requireUserId()
         val currentState = JourneyState.fromValue(journey.state)
         require(JourneyStateMachine.canTransition(currentState, targetState)) {
@@ -386,6 +395,12 @@ class NirapadRepository(
             )
             if (targetState.isTerminal) {
                 updates["endedAt"] = FieldValue.serverTimestamp()
+            }
+            if (totalDistanceKm != null) {
+                updates["totalDistanceKm"] = totalDistanceKm.coerceIn(0.0, 50_000.0)
+            }
+            if (durationMinutes != null) {
+                updates["durationMinutes"] = durationMinutes.coerceIn(0L, 10_080L)
             }
             docRef.update(updates).await()
 
